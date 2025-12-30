@@ -63,7 +63,7 @@ Options:
   --games <n>             Number of self-play games (default: 10)
   --train-sims <n>        MCTS simulations for training side (default: ${TRAINING_MCTS_SIMULATIONS})
   --training-sims <n>     Alias for --train-sims
-  --opponent-sims <n>     MCTS simulations for opponent (default: 200)
+  --opponent-sims <n>     MCTS simulations for opponent (default: 80)
   --batch-size <n>        Batch size per update (default: ${BATCH_SIZE})
   --out <dir>             Output directory (default: public/models/base)
   --help, -h              Show this help
@@ -88,7 +88,7 @@ const options: TrainOptions = {
     1,
     Math.floor(readNumber('train-sims', readPositionalNumber(1) ?? TRAINING_MCTS_SIMULATIONS, ['training-sims']))
   ),
-  opponentSimulations: Math.max(1, Math.floor(readNumber('opponent-sims', readPositionalNumber(2) ?? 200))),
+  opponentSimulations: Math.max(1, Math.floor(readNumber('opponent-sims', readPositionalNumber(2) ?? 80))),
   batchSize: Math.max(1, Math.floor(readNumber('batch-size', BATCH_SIZE)))
 };
 
@@ -187,8 +187,8 @@ const trainBaseModel = async () => {
 
   const opponentConfig: MctsConfig = {
     simulations: options.opponentSimulations,
-    cPuct: 1.4,
-    temperature: 0.8
+    cPuct: 1.2,
+    temperature: 1.1
   };
 
   let gamesPlayed = 0;
