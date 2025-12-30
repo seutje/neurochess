@@ -15,8 +15,6 @@ export interface TrainingMetrics {
   entropy: number;
 }
 
-import type { Move } from 'chess.js';
-
 export interface MoveProbability {
   san: string;
   probability: number;
@@ -31,3 +29,36 @@ export interface HeatmapSquare {
 
 export type PieceSymbol = 'p' | 'n' | 'b' | 'r' | 'q' | 'k';
 export type Color = 'w' | 'b';
+
+export type MctsDifficulty = 'easy' | 'medium' | 'hard';
+
+export interface MctsConfig {
+  simulations: number;
+  cPuct: number;
+  temperature: number;
+  dirichletAlpha?: number;
+  dirichletEpsilon?: number;
+}
+
+export interface MctsMoveStats {
+  move: Move;
+  visitCount: number;
+  prior: number;
+  value: number;
+}
+
+export interface MctsResult {
+  move: Move | null;
+  policy: {
+    move: Move;
+    probability: number;
+    visitCount: number;
+  }[];
+}
+
+export interface TrainingSample {
+  fen: string;
+  policy: number[];
+  player: 'w' | 'b';
+  value: number;
+}

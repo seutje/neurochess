@@ -1,6 +1,6 @@
 import * as tf from '@tensorflow/tfjs';
 import { Chess, Piece, Square } from 'chess.js';
-import { INPUT_PLANES, BOARD_SIZE } from '../constants';
+import { INPUT_PLANES, BOARD_SIZE, POLICY_OUTPUT_SIZE } from '../constants';
 
 const PIECE_ORDER = ['p', 'n', 'b', 'r', 'q', 'k'];
 const SQUARES: Square[] = [];
@@ -63,5 +63,5 @@ export const getLegalMoveMask = (chess: Chess): number[] => {
   // For this demo, we will just return a simple probability distribution placeholder
   // because implementing the full UCI-to-Index mapper is too large for a single file component.
   // We return a dummy mask that matches the policy output size.
-  return new Array(1968).fill(0).map(() => Math.random() > 0.9 ? 1 : 0); 
+  return new Array(POLICY_OUTPUT_SIZE).fill(0).map(() => Math.random() > 0.9 ? 1 : 0); 
 };

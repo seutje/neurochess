@@ -1,5 +1,5 @@
 import * as tf from '@tensorflow/tfjs';
-import { INPUT_PLANES, FILTERS, RESIDUAL_BLOCKS, POLICY_OUTPUT_SIZE } from '../constants';
+import { INPUT_PLANES, FILTERS, RESIDUAL_BLOCKS, POLICY_OUTPUT_SIZE, LEARNING_RATE } from '../constants';
 
 // Helper for Residual Block
 const residualBlock = (input: tf.SymbolicTensor): tf.SymbolicTensor => {
@@ -92,7 +92,7 @@ export const createTinyZeroModel = (): tf.LayersModel => {
   const model = tf.model({ inputs: input, outputs: [policyOutput, valueOutput] });
   
   model.compile({
-    optimizer: tf.train.sgd(0.01),
+    optimizer: tf.train.sgd(LEARNING_RATE),
     loss: ['categoricalCrossentropy', 'meanSquaredError']
   });
 

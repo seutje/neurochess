@@ -1,14 +1,24 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Chess, Move } from 'chess.js';
 import * as tf from '@tensorflow/tfjs';
-import { Activity, Brain, Cpu, Play, Square, StopCircle, RefreshCw, Circle } from 'lucide-react';
+import { Activity, Brain, Cpu, Play, StopCircle, RefreshCw, Circle } from 'lucide-react';
 
 import { HeatmapBoard } from './components/HeatmapBoard';
 import { LossChart, EntropyChart } from './components/Charts';
 import { MoveAnalysis } from './components/MoveAnalysis';
 import { createTinyZeroModel } from './services/model';
 import { boardToTensor } from './services/tensorUtils';
-import { TrainingMetrics, MoveProbability, HeatmapSquare } from './types';
+import { runMcts } from './services/mcts';
+import { moveToIndex } from './services/moveEncoding';
+import { TrainingMetrics, MoveProbability, HeatmapSquare, MctsDifficulty, TrainingSample, MctsConfig } from './types';
+import {
+  POLICY_OUTPUT_SIZE,
+  TRAINING_MCTS_SIMULATIONS,
+  TRAINING_DIRICHLET_ALPHA,
+  TRAINING_DIRICHLET_EPSILON,
+  MAX_REPLAY_BUFFER,
+  BATCH_SIZE
+} from './constants';
 
 const INITIAL_METRICS: TrainingMetrics = {
   epoch: 0,
@@ -19,58 +29,31 @@ const INITIAL_METRICS: TrainingMetrics = {
   entropy: 4.5
 };
 
-// Simplified MCTS Opponent (Black)
-// Evaluates positions based on material and simple safety to simulate a fixed-strength engine.
-const getMCTSMove = (game: Chess): Move | null => {
-    // Clone to ensure we don't mess up main game state if something throws or if undo fails
-    const simulation = new Chess(game.fen());
-    const moves = simulation.moves({ verbose: true });
-    if (moves.length === 0) return null;
-    
-    const pieceValues: Record<string, number> = { p: 1, n: 3, b: 3.2, r: 5, q: 9, k: 0 };
-    
-    // Evaluate position from Black's perspective (Positive = Good for Black)
-    const evaluate = (fen: string) => {
-        const temp = new Chess(fen);
-        if (temp.isCheckmate()) {
-             // If it's White's turn now, Black checkmated White.
-             return temp.turn() === 'w' ? 10000 : -10000;
-        }
-        if (temp.isDraw()) return 0;
-        
-        const board = temp.board();
-        let score = 0;
-        for(let r=0; r<8; r++) {
-            for(let c=0; c<8; c++) {
-                const p = board[r][c];
-                if(p) {
-                    const val = pieceValues[p.type] || 0;
-                    score += p.color === 'b' ? val : -val;
-                    
-                    // Simple center bias
-                    if ((r === 3 || r === 4) && (c === 3 || c === 4)) {
-                        score += p.color === 'b' ? 0.2 : -0.2;
-                    }
-                }
-            }
-        }
-        return score;
-    };
+const MCTS_DIFFICULTY: Record<MctsDifficulty, MctsConfig> = {
+  easy: { simulations: 80, cPuct: 1.2, temperature: 1.1 },
+  medium: { simulations: 200, cPuct: 1.4, temperature: 0.8 },
+  hard: { simulations: 600, cPuct: 1.6, temperature: 0.4 }
+};
 
-    // 1-ply search with noise
-    const candidates = moves.map(m => {
-        simulation.move({ from: m.from, to: m.to, promotion: m.promotion });
-        const score = evaluate(simulation.fen());
-        simulation.undo();
-        // Add randomness to simulate MCTS rollout variance/imperfection
-        return { move: m, score: score + (Math.random() * 0.5 - 0.25) };
-    });
-    
-    // Sort descending (Black wants max score)
-    candidates.sort((a,b) => b.score - a.score);
-    
-    // Pick top move
-    return candidates[0].move;
+const TRAINING_CONFIG: MctsConfig = {
+  simulations: TRAINING_MCTS_SIMULATIONS,
+  cPuct: 1.5,
+  temperature: 1.0,
+  dirichletAlpha: TRAINING_DIRICHLET_ALPHA,
+  dirichletEpsilon: TRAINING_DIRICHLET_EPSILON
+};
+
+const sampleFromPolicy = (policy: number[]): number => {
+  let threshold = Math.random();
+  for (let i = 0; i < policy.length; i++) {
+    threshold -= policy[i];
+    if (threshold <= 0) return i;
+  }
+  return policy.length - 1;
+};
+
+const computeEntropy = (policy: number[]): number => {
+  return policy.reduce((acc, p) => (p > 0 ? acc - p * Math.log(p) : acc), 0);
 };
 
 const App: React.FC = () => {
@@ -78,6 +61,7 @@ const App: React.FC = () => {
   const [game, setGame] = useState(new Chess());
   const [isTraining, setIsTraining] = useState(false);
   const [model, setModel] = useState<tf.LayersModel | null>(null);
+  const [difficulty, setDifficulty] = useState<MctsDifficulty>('medium');
   
   // Metrics & Visuals
   const [metricsHistory, setMetricsHistory] = useState<TrainingMetrics[]>([]);
@@ -86,8 +70,9 @@ const App: React.FC = () => {
   const [topMoves, setTopMoves] = useState<MoveProbability[]>([]);
   
   // Refs for loops
-  const trainingLoopRef = useRef<number | null>(null);
   const gameRef = useRef(new Chess());
+  const replayBufferRef = useRef<TrainingSample[]>([]);
+  const currentGameSamplesRef = useRef<TrainingSample[]>([]);
 
   // Initialize TF Model
   useEffect(() => {
@@ -111,69 +96,50 @@ const App: React.FC = () => {
     // Prevent making moves if the game is already over (waiting for reset)
     if (gameRef.current.isGameOver()) return;
 
-    // 1. Convert current board to tensor
-    const tensorInput = boardToTensor(gameRef.current);
-    
-    // 2. Predict (Inference) - Always run inference to show what the Net thinks
-    const [policyLogits, valueOutput] = tf.tidy(() => {
-        const prediction = model.predict(tensorInput) as tf.Tensor[];
-        return [prediction[0], prediction[1]];
-    });
-
-    const policyData = await (policyLogits as tf.Tensor).data();
-    const valueData = await (valueOutput as tf.Tensor).data();
-    
-    // Dispose input/output
-    tensorInput.dispose();
-    (policyLogits as tf.Tensor).dispose();
-    (valueOutput as tf.Tensor).dispose();
-
-    // 3. Process Predictions for Visualization
-    const legalMoves = gameRef.current.moves({ verbose: true });
-    
-    // Simulate policy distribution (Network learning curve simulation)
-    const simulatedProbabilities = legalMoves.map(m => {
-        let score = Math.random(); 
-        if (m.captured) score += 0.5;
-        if (m.promotion) score += 0.8;
-        if (['e4', 'd4', 'e5', 'd5'].includes(m.to)) score += 0.3;
-        const netInfluence = Math.abs(valueData[0]); 
-        return {
-            move: m,
-            weight: score * (1 + netInfluence)
-        };
-    });
-
-    const totalWeight = simulatedProbabilities.reduce((acc, curr) => acc + curr.weight, 0);
-    const movesWithProbs: MoveProbability[] = simulatedProbabilities.map(mp => ({
-        san: mp.move.san,
-        probability: totalWeight > 0 ? mp.weight / totalWeight : 0,
-        isBest: false,
-        move: mp.move
-    })).sort((a, b) => b.probability - a.probability);
-
-    if (movesWithProbs.length > 0) movesWithProbs[0].isBest = true;
-
-    // 4. Update Visuals
-    setTopMoves(movesWithProbs.slice(0, 10));
-    
-    const newHeatmap: HeatmapSquare[] = movesWithProbs.map((mp) => ({
-        square: mp.move.to,
-        intensity: mp.probability
-    })).filter(h => h.square !== '');
-    setHeatmap(newHeatmap);
-
-    // 5. Select Move based on Turn
     const turn = gameRef.current.turn();
     let selectedMove: Move | null = null;
 
     if (turn === 'w') {
-        // --- WHITE: NEURAL NETWORK ---
-        // Greedy selection from the "Policy"
-        selectedMove = movesWithProbs[0]?.move ?? null;
+      const mcts = await runMcts(gameRef.current, model, TRAINING_CONFIG, true);
+      const policyVector = new Array(POLICY_OUTPUT_SIZE).fill(0);
+      mcts.policy.forEach((entry) => {
+        policyVector[moveToIndex(entry.move)] = entry.probability;
+      });
+
+      currentGameSamplesRef.current.push({
+        fen: gameRef.current.fen(),
+        policy: policyVector,
+        player: 'w',
+        value: 0
+      });
+
+      const movesWithProbs: MoveProbability[] = mcts.policy
+        .map((entry) => ({
+          san: entry.move.san,
+          probability: entry.probability,
+          isBest: false,
+          move: entry.move
+        }))
+        .sort((a, b) => b.probability - a.probability);
+
+      if (movesWithProbs.length > 0) movesWithProbs[0].isBest = true;
+      setTopMoves(movesWithProbs.slice(0, 10));
+      setHeatmap(
+        movesWithProbs.map((mp) => ({
+          square: mp.move.to,
+          intensity: mp.probability
+        }))
+      );
+      setCurrentMetrics((prev) => ({
+        ...prev,
+        entropy: computeEntropy(mcts.policy.map((entry) => entry.probability))
+      }));
+
+      const sampledIndex = sampleFromPolicy(mcts.policy.map((entry) => entry.probability));
+      selectedMove = mcts.policy[sampledIndex]?.move ?? mcts.move;
     } else {
-        // --- BLACK: MCTS OPPONENT ---
-        selectedMove = getMCTSMove(gameRef.current);
+      const mcts = await runMcts(gameRef.current, model, MCTS_DIFFICULTY[difficulty]);
+      selectedMove = mcts.move;
     }
 
     if (selectedMove) {
@@ -195,43 +161,80 @@ const App: React.FC = () => {
 
     // 6. Check Game End
     if (gameRef.current.isGameOver()) {
-        const gameCount = currentMetrics.gamesPlayed + 1;
-        
-        // Determine Winner for Metrics
-        let winDelta = 0; // Neutral
-        if (gameRef.current.isCheckmate()) {
-            // If turn is 'w', it means Black just moved and mated White.
-            if (gameRef.current.turn() === 'w') winDelta = -0.01; // MCTS Won
-            else winDelta = 0.01; // Net Won
+      const gameCount = currentMetrics.gamesPlayed + 1;
+      let outcome = 0;
+      if (gameRef.current.isCheckmate()) {
+        outcome = gameRef.current.turn() === 'w' ? -1 : 1;
+      }
+
+      const finalizedSamples = currentGameSamplesRef.current.map((sample) => ({
+        ...sample,
+        value: sample.player === 'w' ? outcome : -outcome
+      }));
+      replayBufferRef.current.push(...finalizedSamples);
+      currentGameSamplesRef.current = [];
+      if (replayBufferRef.current.length > MAX_REPLAY_BUFFER) {
+        replayBufferRef.current = replayBufferRef.current.slice(-MAX_REPLAY_BUFFER);
+      }
+
+      let policyLoss = currentMetrics.policyLoss;
+      let valueLoss = currentMetrics.valueLoss;
+
+      if (replayBufferRef.current.length >= BATCH_SIZE) {
+        const batch = [];
+        for (let i = 0; i < BATCH_SIZE; i++) {
+          const sampleIndex = Math.floor(Math.random() * replayBufferRef.current.length);
+          batch.push(replayBufferRef.current[sampleIndex]);
         }
 
-        // Delay reset slightly to show the mate
-        setTimeout(() => {
-             gameRef.current.reset();
-             setGame(new Chess());
-        }, 1000);
+        const inputTensors = batch.map((sample) => boardToTensor(new Chess(sample.fen)));
+        const stateTensor = tf.concat(inputTensors, 0);
+        inputTensors.forEach((t) => t.dispose());
+        const policyTensor = tf.tensor2d(batch.map((s) => s.policy), [batch.length, POLICY_OUTPUT_SIZE]);
+        const valueTargets = batch.map((s) => s.value);
+        const valueTensor = tf.tensor2d(valueTargets, [batch.length, 1]);
 
-        // Update Training Metrics
-        const decay = 0.995;
-        const newEpoch = currentMetrics.epoch + 1;
-        
-        const newMetrics = {
-            epoch: newEpoch,
-            gamesPlayed: gameCount,
-            policyLoss: Math.max(0.5, currentMetrics.policyLoss * decay + (Math.random() * 0.1 - 0.05)),
-            valueLoss: Math.max(0.2, currentMetrics.valueLoss * decay + (Math.random() * 0.1 - 0.05)),
-            winRate: Math.max(0, Math.min(1, currentMetrics.winRate + winDelta)),
-            entropy: Math.max(1.0, currentMetrics.entropy * decay)
-        };
-
-        setCurrentMetrics(newMetrics);
-        setMetricsHistory(prev => {
-            const updated = [...prev, newMetrics];
-            return updated.slice(-50);
+        const history = await model.fit(stateTensor, [policyTensor, valueTensor], {
+          batchSize: Math.min(BATCH_SIZE, batch.length),
+          epochs: 1,
+          verbose: 0
         });
+
+        stateTensor.dispose();
+        policyTensor.dispose();
+        valueTensor.dispose();
+
+        const policyHistory = history.history['policy_head_loss'] ?? history.history['loss'];
+        const valueHistory = history.history['value_head_loss'];
+        if (policyHistory && policyHistory.length > 0) policyLoss = Number(policyHistory[0]);
+        if (valueHistory && valueHistory.length > 0) valueLoss = Number(valueHistory[0]);
+      }
+
+      const newWinRate =
+        (currentMetrics.winRate * currentMetrics.gamesPlayed + (outcome === 1 ? 1 : 0)) / gameCount;
+
+      const newMetrics = {
+        epoch: currentMetrics.epoch + 1,
+        gamesPlayed: gameCount,
+        policyLoss,
+        valueLoss,
+        winRate: newWinRate,
+        entropy: currentMetrics.entropy
+      };
+
+      setCurrentMetrics(newMetrics);
+      setMetricsHistory((prev) => {
+        const updated = [...prev, newMetrics];
+        return updated.slice(-50);
+      });
+
+      setTimeout(() => {
+        gameRef.current.reset();
+        setGame(new Chess());
+      }, 1000);
     }
 
-  }, [model, currentMetrics]);
+  }, [model, currentMetrics, difficulty]);
 
 
   // Loop Effect
@@ -295,6 +298,18 @@ const App: React.FC = () => {
                 <span className="text-xs font-bold text-neuro-success flex items-center gap-1">
                      <Cpu size={12} /> GPU (WEBGL)
                 </span>
+             </div>
+             <div className="flex flex-col items-end">
+                <span className="text-xs text-gray-500 font-mono">MCTS DIFFICULTY</span>
+                <select
+                  value={difficulty}
+                  onChange={(event) => setDifficulty(event.target.value as MctsDifficulty)}
+                  className="bg-neuro-800 border border-neuro-600 text-xs font-mono text-gray-200 rounded px-2 py-1"
+                >
+                  <option value="easy">Easy</option>
+                  <option value="medium">Medium</option>
+                  <option value="hard">Hard</option>
+                </select>
              </div>
              <button 
                 onClick={isTraining ? handleStopTraining : handleStartTraining}
