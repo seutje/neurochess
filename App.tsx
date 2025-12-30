@@ -64,6 +64,7 @@ const App: React.FC = () => {
   const [modelStatus, setModelStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [modelError, setModelError] = useState<string | null>(null);
   const [difficulty, setDifficulty] = useState<MctsDifficulty>('medium');
+  const [isMctsThinking, setIsMctsThinking] = useState(false);
   
   // Metrics & Visuals
   const [metricsHistory, setMetricsHistory] = useState<TrainingMetrics[]>([]);
@@ -75,6 +76,18 @@ const App: React.FC = () => {
   const gameRef = useRef(new Chess());
   const replayBufferRef = useRef<TrainingSample[]>([]);
   const currentGameSamplesRef = useRef<TrainingSample[]>([]);
+
+  const runMctsWithIndicator = useCallback(
+    async (gameState: Chess, activeModel: tf.LayersModel, config: MctsConfig, addNoise = false) => {
+      setIsMctsThinking(true);
+      try {
+        return await runMcts(gameState, activeModel, config, addNoise);
+      } finally {
+        setIsMctsThinking(false);
+      }
+    },
+    []
+  );
 
   // Initialize TF Model
   useEffect(() => {
@@ -120,7 +133,7 @@ const App: React.FC = () => {
     let selectedMove: Move | null = null;
 
     if (turn === 'w') {
-      const mcts = await runMcts(gameRef.current, model, TRAINING_CONFIG, true);
+      const mcts = await runMctsWithIndicator(gameRef.current, model, TRAINING_CONFIG, true);
       const policyVector = new Array(POLICY_OUTPUT_SIZE).fill(0);
       mcts.policy.forEach((entry) => {
         policyVector[moveToIndex(entry.move)] = entry.probability;
@@ -158,7 +171,7 @@ const App: React.FC = () => {
       const sampledIndex = sampleFromPolicy(mcts.policy.map((entry) => entry.probability));
       selectedMove = mcts.policy[sampledIndex]?.move ?? mcts.move;
     } else {
-      const mcts = await runMcts(gameRef.current, model, MCTS_DIFFICULTY[difficulty]);
+      const mcts = await runMctsWithIndicator(gameRef.current, model, MCTS_DIFFICULTY[difficulty]);
       selectedMove = mcts.move;
     }
 
@@ -267,7 +280,7 @@ const App: React.FC = () => {
       }, 1000);
     }
 
-  }, [model, currentMetrics, difficulty]);
+  }, [model, currentMetrics, difficulty, runMctsWithIndicator]);
 
 
   // Loop Effect
@@ -301,9 +314,13 @@ const App: React.FC = () => {
     if (modelStatus !== 'ready') return;
     setIsTraining(true);
   };
-  const handleStopTraining = () => setIsTraining(false);
+  const handleStopTraining = () => {
+    setIsTraining(false);
+    setIsMctsThinking(false);
+  };
   const handleReset = () => {
       setIsTraining(false);
+      setIsMctsThinking(false);
       gameRef.current.reset();
       setGame(new Chess());
       setMetricsHistory([]);
@@ -384,7 +401,7 @@ const App: React.FC = () => {
             </div>
             {/* Status Bar under board */}
             <div className="mt-4 flex justify-between items-center bg-neuro-800 p-3 rounded-lg border border-neuro-700">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-6">
                     <span className={`w-2 h-2 rounded-full ${isTraining ? 'bg-neuro-success animate-pulse' : 'bg-gray-500'}`}></span>
                     <div className="flex flex-col">
                          <span className="text-xs font-mono text-gray-400">STATUS</span>
@@ -401,6 +418,34 @@ const App: React.FC = () => {
                         {modelStatus === 'error' && modelError ? (
                           <span className="text-xs font-mono text-neuro-danger">{modelError}</span>
                         ) : null}
+                    </div>
+                    <div className="flex flex-col">
+                        <span className="text-xs font-mono text-gray-400">TURN</span>
+                        <span className="text-sm font-bold font-mono flex items-center gap-2">
+                            <span
+                              className={`w-2 h-2 rounded-full border border-gray-500 ${
+                                game.turn() === 'w' ? 'bg-white' : 'bg-gray-900'
+                              }`}
+                            ></span>
+                            <span className={game.turn() === 'w' ? 'text-white' : 'text-gray-300'}>
+                              {game.turn() === 'w' ? 'WHITE' : 'BLACK'}
+                            </span>
+                        </span>
+                    </div>
+                    <div className="flex flex-col">
+                        <span className="text-xs font-mono text-gray-400">MCTS</span>
+                        <span
+                          className={`text-sm font-bold font-mono flex items-center gap-2 ${
+                            isMctsThinking ? 'text-neuro-accent' : 'text-gray-500'
+                          }`}
+                        >
+                            <span
+                              className={`w-2 h-2 rounded-full ${
+                                isMctsThinking ? 'bg-neuro-accent animate-pulse' : 'bg-gray-600'
+                              }`}
+                            ></span>
+                            {isMctsThinking ? 'THINKING' : 'IDLE'}
+                        </span>
                     </div>
                 </div>
                 <button onClick={handleReset} className="text-gray-500 hover:text-white transition">
