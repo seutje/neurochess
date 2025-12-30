@@ -61,6 +61,8 @@ const App: React.FC = () => {
   const [game, setGame] = useState(new Chess());
   const [isTraining, setIsTraining] = useState(false);
   const [model, setModel] = useState<tf.LayersModel | null>(null);
+  const [modelStatus, setModelStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [modelError, setModelError] = useState<string | null>(null);
   const [difficulty, setDifficulty] = useState<MctsDifficulty>('medium');
   
   // Metrics & Visuals
@@ -77,10 +79,19 @@ const App: React.FC = () => {
   // Initialize TF Model
   useEffect(() => {
     const initModel = async () => {
-      await tf.ready();
-      const newModel = createTinyZeroModel();
-      setModel(newModel);
-      console.log("TinyZero Model Initialized: ", newModel.summary());
+      setModelStatus('loading');
+      setModelError(null);
+      try {
+        await tf.ready();
+        const newModel = createTinyZeroModel();
+        setModel(newModel);
+        setModelStatus('ready');
+        console.log("TinyZero Model Initialized: ", newModel.summary());
+      } catch (err) {
+        console.error('Model init failed:', err);
+        setModelStatus('error');
+        setModelError(err instanceof Error ? err.message : 'Unknown error');
+      }
     };
     initModel();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -142,21 +153,34 @@ const App: React.FC = () => {
       selectedMove = mcts.move;
     }
 
+    const applyMove = (move: Move): boolean => {
+      try {
+        const applied = gameRef.current.move({
+          from: move.from,
+          to: move.to,
+          promotion: move.promotion
+        });
+        if (!applied) return false;
+        setGame(new Chess(gameRef.current.fen())); // Update UI
+        return true;
+      } catch (e) {
+        console.error("Invalid move attempted:", move, e);
+        return false;
+      }
+    };
+
     if (selectedMove) {
-        try {
-            const applied = gameRef.current.move({
-                from: selectedMove.from,
-                to: selectedMove.to,
-                promotion: selectedMove.promotion
-            });
-            if (!applied) {
-                console.warn("Move rejected by engine:", selectedMove);
-                return;
-            }
-            setGame(new Chess(gameRef.current.fen())); // Update UI
-        } catch (e) {
-            console.error("Invalid move attempted:", selectedMove, e);
+      const applied = applyMove(selectedMove);
+      if (!applied) {
+        console.warn("Move rejected by engine:", selectedMove);
+        const fallbackMoves = gameRef.current.moves({ verbose: true }) as Move[];
+        if (fallbackMoves.length > 0) {
+          const fallback = fallbackMoves[Math.floor(Math.random() * fallbackMoves.length)];
+          if (applyMove(fallback)) {
+            console.warn("Applied fallback random move:", fallback);
+          }
         }
+      }
     }
 
     // 6. Check Game End
@@ -264,7 +288,10 @@ const App: React.FC = () => {
 
 
   // UI Handlers
-  const handleStartTraining = () => setIsTraining(true);
+  const handleStartTraining = () => {
+    if (modelStatus !== 'ready') return;
+    setIsTraining(true);
+  };
   const handleStopTraining = () => setIsTraining(false);
   const handleReset = () => {
       setIsTraining(false);
@@ -313,6 +340,7 @@ const App: React.FC = () => {
              </div>
              <button 
                 onClick={isTraining ? handleStopTraining : handleStartTraining}
+                disabled={!isTraining && modelStatus !== 'ready'}
                 className={`flex items-center gap-2 px-6 py-2 rounded-full font-bold transition-all duration-300 ${
                     isTraining 
                     ? 'bg-neuro-danger/10 text-neuro-danger border border-neuro-danger hover:bg-neuro-danger hover:text-white' 
@@ -334,6 +362,15 @@ const App: React.FC = () => {
                     game={game} 
                     heatmap={heatmap} 
                     isBot={isTraining}
+                    statusText={
+                      modelStatus === 'loading'
+                        ? 'INITIALIZING MODEL...'
+                        : modelStatus === 'error'
+                          ? 'MODEL INIT FAILED'
+                          : isTraining
+                            ? 'SELF-PLAY RUNNING'
+                            : 'IDLE'
+                    }
                 />
             </div>
             {/* Status Bar under board */}
@@ -352,6 +389,9 @@ const App: React.FC = () => {
                                 </span>
                             ) : 'IDLE'}
                         </span>
+                        {modelStatus === 'error' && modelError ? (
+                          <span className="text-xs font-mono text-neuro-danger">{modelError}</span>
+                        ) : null}
                     </div>
                 </div>
                 <button onClick={handleReset} className="text-gray-500 hover:text-white transition">

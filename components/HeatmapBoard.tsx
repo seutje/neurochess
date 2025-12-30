@@ -8,9 +8,10 @@ interface Props {
   heatmap: HeatmapSquare[];
   onPieceDrop?: (source: string, target: string, piece: string) => boolean;
   isBot?: boolean;
+  statusText?: string;
 }
 
-export const HeatmapBoard: React.FC<Props> = ({ game, heatmap, onPieceDrop, isBot }) => {
+export const HeatmapBoard: React.FC<Props> = ({ game, heatmap, onPieceDrop, isBot, statusText }) => {
   // Convert custom heatmap array to react-chessboard customSquareStyles
   const customSquareStyles = React.useMemo(() => {
     const styles: Record<string, React.CSSProperties> = {};
@@ -56,6 +57,11 @@ export const HeatmapBoard: React.FC<Props> = ({ game, heatmap, onPieceDrop, isBo
             customLightSquareStyle={{ backgroundColor: '#3e3e5e' }}
             arePiecesDraggable={!isBot}
         />
+        {statusText ? (
+          <div className="absolute top-2 left-2 bg-neuro-900/70 text-neuro-200 text-xs font-mono px-2 py-1 rounded border border-neuro-700">
+            {statusText}
+          </div>
+        ) : null}
       </div>
     </div>
   );
