@@ -1,4 +1,5 @@
 import { Chess, Move } from 'chess.js';
+import '@tensorflow/tfjs-node';
 import * as tf from '@tensorflow/tfjs';
 import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -143,7 +144,17 @@ const saveModel = async (model: tf.LayersModel, outDir: string) => {
       await writeFile(path.join(resolvedOut, 'model.json'), JSON.stringify(modelJson, null, 2));
       await writeFile(path.join(resolvedOut, 'weights.bin'), weights);
 
-      return { modelArtifactsInfo: tf.io.getModelArtifactsInfo(artifacts) };
+      const modelTopologyJson = artifacts.modelTopology
+        ? JSON.stringify(artifacts.modelTopology)
+        : null;
+      const modelArtifactsInfo: tf.io.ModelArtifactsInfo = {
+        dateSaved: new Date(),
+        modelTopologyType: 'JSON',
+        modelTopologyBytes: modelTopologyJson ? Buffer.byteLength(modelTopologyJson) : 0,
+        weightDataBytes: weights.byteLength
+      };
+
+      return { modelArtifactsInfo };
     })
   );
 };
@@ -156,7 +167,12 @@ const trainBaseModel = async () => {
   console.log(`Batch size: ${options.batchSize}`);
   console.log(`Output: ${options.outDir}`);
 
-  await tf.setBackend('cpu');
+  try {
+    await tf.setBackend('tensorflow');
+  } catch (err) {
+    console.warn('TensorFlow backend unavailable, falling back to CPU:', err);
+    await tf.setBackend('cpu');
+  }
   await tf.ready();
 
   const model = createTinyZeroModel();

@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "train:base": "tsx scripts/train-base-model.ts"
+    "train:base": "NODE_OPTIONS=\"--require=./scripts/tfjs-node-compat.cjs\" tsx scripts/train-base-model.ts"
   },
   "dependencies": {
     "lucide-react": "^0.562.0",
@@ -16,7 +16,8 @@
     "react-dom": "^19.2.3",
     "chess.js": "^1.4.0",
     "react-chessboard": "^5.8.6",
-    "@tensorflow/tfjs": "^4.22.0"
+    "@tensorflow/tfjs": "^4.22.0",
+    "@tensorflow/tfjs-node": "^4.22.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
