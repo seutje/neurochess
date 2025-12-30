@@ -1,4 +1,4 @@
-import type { Move } from 'chess.js';
+import type { Square } from 'chess.js';
 
 export enum PlayerType {
   HUMAN = 'HUMAN',
@@ -19,7 +19,7 @@ export interface MoveProbability {
   san: string;
   probability: number;
   isBest: boolean;
-  move: Move;
+  move: MoveLike;
 }
 
 export interface HeatmapSquare {
@@ -40,17 +40,24 @@ export interface MctsConfig {
   dirichletEpsilon?: number;
 }
 
+export interface MoveLike {
+  from: Square;
+  to: Square;
+  promotion?: string;
+  san?: string;
+}
+
 export interface MctsMoveStats {
-  move: Move;
+  move: MoveLike;
   visitCount: number;
   prior: number;
   value: number;
 }
 
 export interface MctsResult {
-  move: Move | null;
+  move: MoveLike | null;
   policy: {
-    move: Move;
+    move: MoveLike;
     probability: number;
     visitCount: number;
   }[];

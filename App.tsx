@@ -1,24 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Chess, Move } from 'chess.js';
-import * as tf from '@tensorflow/tfjs';
+import React, { useState, useEffect, useRef } from 'react';
+import { Chess } from 'chess.js';
 import { Activity, Brain, Cpu, Play, StopCircle, RefreshCw, Circle } from 'lucide-react';
 
 import { HeatmapBoard } from './components/HeatmapBoard';
 import { LossChart, EntropyChart } from './components/Charts';
 import { MoveAnalysis } from './components/MoveAnalysis';
-import { compileTinyZeroModel, createTinyZeroModel } from './services/model';
-import { boardToTensor } from './services/tensorUtils';
-import { runMcts } from './services/mcts';
-import { moveToIndex } from './services/moveEncoding';
-import { TrainingMetrics, MoveProbability, HeatmapSquare, MctsDifficulty, TrainingSample, MctsConfig } from './types';
-import {
-  POLICY_OUTPUT_SIZE,
-  TRAINING_MCTS_SIMULATIONS,
-  TRAINING_DIRICHLET_ALPHA,
-  TRAINING_DIRICHLET_EPSILON,
-  MAX_REPLAY_BUFFER,
-  BATCH_SIZE
-} from './constants';
+import { TrainingMetrics, MoveProbability, HeatmapSquare, MctsDifficulty } from './types';
 
 const INITIAL_METRICS: TrainingMetrics = {
   epoch: 0,
@@ -29,38 +16,30 @@ const INITIAL_METRICS: TrainingMetrics = {
   entropy: 4.5
 };
 
-const MCTS_DIFFICULTY: Record<MctsDifficulty, MctsConfig> = {
-  easy: { simulations: 80, cPuct: 1.2, temperature: 1.1 },
-  medium: { simulations: 200, cPuct: 1.4, temperature: 0.8 },
-  hard: { simulations: 600, cPuct: 1.6, temperature: 0.4 }
+type WorkerStatus = 'loading' | 'ready' | 'error';
+
+type WorkerStatusMessage = {
+  type: 'status';
+  status: WorkerStatus;
+  error?: string;
 };
 
-const TRAINING_CONFIG: MctsConfig = {
-  simulations: TRAINING_MCTS_SIMULATIONS,
-  cPuct: 1.5,
-  temperature: 1.0,
-  dirichletAlpha: TRAINING_DIRICHLET_ALPHA,
-  dirichletEpsilon: TRAINING_DIRICHLET_EPSILON
+type WorkerStateMessage = {
+  type: 'state';
+  fen: string;
+  heatmap: HeatmapSquare[];
+  topMoves: MoveProbability[];
+  currentMetrics: TrainingMetrics;
+  metricsHistory: TrainingMetrics[];
+  isMctsThinking: boolean;
 };
 
-const sampleFromPolicy = (policy: number[]): number => {
-  let threshold = Math.random();
-  for (let i = 0; i < policy.length; i++) {
-    threshold -= policy[i];
-    if (threshold <= 0) return i;
-  }
-  return policy.length - 1;
-};
-
-const computeEntropy = (policy: number[]): number => {
-  return policy.reduce((acc, p) => (p > 0 ? acc - p * Math.log(p) : acc), 0);
-};
+type WorkerMessage = WorkerStatusMessage | WorkerStateMessage;
 
 const App: React.FC = () => {
   // Game State
   const [game, setGame] = useState(new Chess());
   const [isTraining, setIsTraining] = useState(false);
-  const [model, setModel] = useState<tf.LayersModel | null>(null);
   const [modelStatus, setModelStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [modelError, setModelError] = useState<string | null>(null);
   const [difficulty, setDifficulty] = useState<MctsDifficulty>('medium');
@@ -72,263 +51,58 @@ const App: React.FC = () => {
   const [heatmap, setHeatmap] = useState<HeatmapSquare[]>([]);
   const [topMoves, setTopMoves] = useState<MoveProbability[]>([]);
   
-  // Refs for loops
-  const gameRef = useRef(new Chess());
-  const replayBufferRef = useRef<TrainingSample[]>([]);
-  const currentGameSamplesRef = useRef<TrainingSample[]>([]);
+  const workerRef = useRef<Worker | null>(null);
 
-  const runMctsWithIndicator = useCallback(
-    async (gameState: Chess, activeModel: tf.LayersModel, config: MctsConfig, addNoise = false) => {
-      setIsMctsThinking(true);
-      try {
-        return await runMcts(gameState, activeModel, config, addNoise);
-      } finally {
-        setIsMctsThinking(false);
-      }
-    },
-    []
-  );
-
-  // Initialize TF Model
   useEffect(() => {
-    const initModel = async () => {
-      setModelStatus('loading');
-      setModelError(null);
-      try {
-        await tf.ready();
-        let newModel: tf.LayersModel;
-        try {
-          const baseRoot = new URL(import.meta.env.BASE_URL ?? '/', window.location.origin);
-          const baseModelUrl = new URL('models/base/model.json', baseRoot).toString();
-          const loaded = await tf.loadLayersModel(baseModelUrl);
-          newModel = compileTinyZeroModel(loaded);
-          console.info(`Loaded base model from ${baseModelUrl}`);
-        } catch (loadErr) {
-          newModel = createTinyZeroModel();
-          console.warn('Base model not found; using fresh weights.', loadErr);
-        }
-        setModel(newModel);
-        setModelStatus('ready');
-        newModel.summary();
-        console.log("TinyZero Model Initialized.");
-      } catch (err) {
-        console.error('Model init failed:', err);
-        setModelStatus('error');
-        setModelError(err instanceof Error ? err.message : 'Unknown error');
+    const worker = new Worker(new URL('./workers/trainingWorker.ts', import.meta.url), { type: 'module' });
+    workerRef.current = worker;
+
+    worker.onmessage = (event: MessageEvent<WorkerMessage>) => {
+      const message = event.data;
+      if (message.type === 'status') {
+        setModelStatus(message.status);
+        setModelError(message.status === 'error' ? message.error ?? 'Unknown error' : null);
+        return;
       }
-    };
-    initModel();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // --- Core "AI" Logic (Simulated for Web Browser Latency) ---
-  // In a real app, this runs in a WebWorker. Here we run it async on main thread
-  // but "throttle" it to make it visual.
-  
-  const stepTraining = useCallback(async () => {
-    if (!model) return;
-
-    // Prevent making moves if the game is already over (waiting for reset)
-    if (gameRef.current.isGameOver()) return;
-
-    const turn = gameRef.current.turn();
-    let selectedMove: Move | null = null;
-
-    if (turn === 'w') {
-      const mcts = await runMctsWithIndicator(gameRef.current, model, TRAINING_CONFIG, true);
-      const policyVector = new Array(POLICY_OUTPUT_SIZE).fill(0);
-      mcts.policy.forEach((entry) => {
-        policyVector[moveToIndex(entry.move)] = entry.probability;
-      });
-
-      currentGameSamplesRef.current.push({
-        fen: gameRef.current.fen(),
-        policy: policyVector,
-        player: 'w',
-        value: 0
-      });
-
-      const movesWithProbs: MoveProbability[] = mcts.policy
-        .map((entry) => ({
-          san: entry.move.san,
-          probability: entry.probability,
-          isBest: false,
-          move: entry.move
-        }))
-        .sort((a, b) => b.probability - a.probability);
-
-      if (movesWithProbs.length > 0) movesWithProbs[0].isBest = true;
-      setTopMoves(movesWithProbs.slice(0, 10));
-      setHeatmap(
-        movesWithProbs.map((mp) => ({
-          square: mp.move.to,
-          intensity: mp.probability
-        }))
-      );
-      setCurrentMetrics((prev) => ({
-        ...prev,
-        entropy: computeEntropy(mcts.policy.map((entry) => entry.probability))
-      }));
-
-      const sampledIndex = sampleFromPolicy(mcts.policy.map((entry) => entry.probability));
-      selectedMove = mcts.policy[sampledIndex]?.move ?? mcts.move;
-    } else {
-      const mcts = await runMctsWithIndicator(gameRef.current, model, MCTS_DIFFICULTY[difficulty]);
-      selectedMove = mcts.move;
-    }
-
-    const applyMove = (move: Move): boolean => {
-      try {
-        const applied = gameRef.current.move({
-          from: move.from,
-          to: move.to,
-          promotion: move.promotion
-        });
-        if (!applied) return false;
-        setGame(new Chess(gameRef.current.fen())); // Update UI
-        return true;
-      } catch (e) {
-        console.error("Invalid move attempted:", move, e);
-        return false;
-      }
+      setGame(new Chess(message.fen));
+      setHeatmap(message.heatmap);
+      setTopMoves(message.topMoves);
+      setCurrentMetrics(message.currentMetrics);
+      setMetricsHistory(message.metricsHistory);
+      setIsMctsThinking(message.isMctsThinking);
     };
 
-    if (selectedMove) {
-      const applied = applyMove(selectedMove);
-      if (!applied) {
-        console.warn("Move rejected by engine:", selectedMove);
-        const fallbackMoves = gameRef.current.moves({ verbose: true }) as Move[];
-        if (fallbackMoves.length > 0) {
-          const fallback = fallbackMoves[Math.floor(Math.random() * fallbackMoves.length)];
-          if (applyMove(fallback)) {
-            console.warn("Applied fallback random move:", fallback);
-          }
-        }
-      }
-    }
+    const baseRoot = new URL(import.meta.env.BASE_URL ?? '/', window.location.origin);
+    const baseModelUrl = new URL('models/base/model.json', baseRoot).toString();
+    worker.postMessage({ type: 'init', baseModelUrl });
 
-    // 6. Check Game End
-    if (gameRef.current.isGameOver()) {
-      const gameCount = currentMetrics.gamesPlayed + 1;
-      let outcome = 0;
-      if (gameRef.current.isCheckmate()) {
-        outcome = gameRef.current.turn() === 'w' ? -1 : 1;
-      }
-
-      const finalizedSamples = currentGameSamplesRef.current.map((sample) => ({
-        ...sample,
-        value: sample.player === 'w' ? outcome : -outcome
-      }));
-      replayBufferRef.current.push(...finalizedSamples);
-      currentGameSamplesRef.current = [];
-      if (replayBufferRef.current.length > MAX_REPLAY_BUFFER) {
-        replayBufferRef.current = replayBufferRef.current.slice(-MAX_REPLAY_BUFFER);
-      }
-
-      let policyLoss = currentMetrics.policyLoss;
-      let valueLoss = currentMetrics.valueLoss;
-
-      if (replayBufferRef.current.length >= BATCH_SIZE) {
-        const batch = [];
-        for (let i = 0; i < BATCH_SIZE; i++) {
-          const sampleIndex = Math.floor(Math.random() * replayBufferRef.current.length);
-          batch.push(replayBufferRef.current[sampleIndex]);
-        }
-
-        const inputTensors = batch.map((sample) => boardToTensor(new Chess(sample.fen)));
-        const stateTensor = tf.concat(inputTensors, 0);
-        inputTensors.forEach((t) => t.dispose());
-        const policyTensor = tf.tensor2d(batch.map((s) => s.policy), [batch.length, POLICY_OUTPUT_SIZE]);
-        const valueTargets = batch.map((s) => s.value);
-        const valueTensor = tf.tensor2d(valueTargets, [batch.length, 1]);
-
-        const history = await model.fit(stateTensor, [policyTensor, valueTensor], {
-          batchSize: Math.min(BATCH_SIZE, batch.length),
-          epochs: 1,
-          verbose: 0
-        });
-
-        stateTensor.dispose();
-        policyTensor.dispose();
-        valueTensor.dispose();
-
-        const policyHistory = history.history['policy_head_loss'] ?? history.history['loss'];
-        const valueHistory = history.history['value_head_loss'];
-        if (policyHistory && policyHistory.length > 0) policyLoss = Number(policyHistory[0]);
-        if (valueHistory && valueHistory.length > 0) valueLoss = Number(valueHistory[0]);
-      }
-
-      const newWinRate =
-        (currentMetrics.winRate * currentMetrics.gamesPlayed + (outcome === 1 ? 1 : 0)) / gameCount;
-
-      const newMetrics = {
-        epoch: currentMetrics.epoch + 1,
-        gamesPlayed: gameCount,
-        policyLoss,
-        valueLoss,
-        winRate: newWinRate,
-        entropy: currentMetrics.entropy
-      };
-
-      setCurrentMetrics(newMetrics);
-      setMetricsHistory((prev) => {
-        const updated = [...prev, newMetrics];
-        return updated.slice(-50);
-      });
-
-      setTimeout(() => {
-        gameRef.current.reset();
-        setGame(new Chess());
-      }, 1000);
-    }
-
-  }, [model, currentMetrics, difficulty, runMctsWithIndicator]);
-
-
-  // Loop Effect
-  useEffect(() => {
-    let timeoutId: number;
-
-    if (isTraining) {
-        const loop = async () => {
-            try {
-                await stepTraining();
-            } catch (err) {
-                console.error("Training Loop Error:", err);
-            }
-
-            // Network moves fast, MCTS moves fast in this simplified version
-            // Add slight delay for visual pacing
-            const thinkingTime = Math.floor(Math.random() * 500) + 100;
-            timeoutId = window.setTimeout(loop, thinkingTime);
-        };
-        loop();
-    } 
-    
     return () => {
-        clearTimeout(timeoutId);
+      worker.terminate();
+      workerRef.current = null;
     };
-  }, [isTraining, stepTraining]);
+  }, []);
 
 
   // UI Handlers
   const handleStartTraining = () => {
     if (modelStatus !== 'ready') return;
     setIsTraining(true);
+    workerRef.current?.postMessage({ type: 'start' });
   };
   const handleStopTraining = () => {
     setIsTraining(false);
     setIsMctsThinking(false);
+    workerRef.current?.postMessage({ type: 'stop' });
   };
   const handleReset = () => {
       setIsTraining(false);
       setIsMctsThinking(false);
-      gameRef.current.reset();
       setGame(new Chess());
       setMetricsHistory([]);
       setCurrentMetrics(INITIAL_METRICS);
       setHeatmap([]);
       setTopMoves([]);
+      workerRef.current?.postMessage({ type: 'reset' });
   };
 
   return (
@@ -358,7 +132,11 @@ const App: React.FC = () => {
                 <span className="text-xs text-gray-500 font-mono">MCTS DIFFICULTY</span>
                 <select
                   value={difficulty}
-                  onChange={(event) => setDifficulty(event.target.value as MctsDifficulty)}
+                  onChange={(event) => {
+                    const nextDifficulty = event.target.value as MctsDifficulty;
+                    setDifficulty(nextDifficulty);
+                    workerRef.current?.postMessage({ type: 'setDifficulty', difficulty: nextDifficulty });
+                  }}
                   className="bg-neuro-800 border border-neuro-600 text-xs font-mono text-gray-200 rounded px-2 py-1"
                 >
                   <option value="easy">Easy</option>

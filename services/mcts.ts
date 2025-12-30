@@ -93,7 +93,7 @@ const buildMoveStats = (game: Chess, root: MctsNode): MctsMoveStats[] => {
   });
 };
 
-const pickMoveFromVisits = (stats: MctsMoveStats[], temperature: number): Move | null => {
+const pickMoveFromVisits = (stats: MctsMoveStats[], temperature: number): MctsMoveStats['move'] | null => {
   if (stats.length === 0) return null;
   if (temperature <= 0) {
     return stats.reduce((best, current) => (current.visitCount > best.visitCount ? current : best)).move;
