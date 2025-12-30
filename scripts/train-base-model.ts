@@ -199,11 +199,14 @@ const trainBaseModel = async () => {
   const replayBuffer: TrainingSample[] = [];
   const start = Date.now();
 
+  const maxMovesPerGame = 40;
+
   while (gamesPlayed < options.games) {
     const game = new Chess();
     const currentGameSamples: TrainingSample[] = [];
+    let movesPlayed = 0;
 
-    while (!game.isGameOver()) {
+    while (!game.isGameOver() && movesPlayed < maxMovesPerGame) {
       let selectedMove: Move | null = null;
 
       if (game.turn() === 'w') {
@@ -227,16 +230,23 @@ const trainBaseModel = async () => {
         selectedMove = mcts.move;
       }
 
+      let moved = false;
       if (selectedMove) {
         const applied = applyMove(game, selectedMove);
         if (!applied) {
           const fallbackMoves = game.moves({ verbose: true }) as Move[];
           if (fallbackMoves.length > 0) {
             const fallback = fallbackMoves[Math.floor(Math.random() * fallbackMoves.length)];
-            applyMove(game, fallback);
+            if (applyMove(game, fallback)) {
+              moved = true;
+            }
           }
+        } else {
+          moved = true;
         }
       }
+      if (!moved) break;
+      movesPlayed += 1;
     }
 
     const gameCount = gamesPlayed + 1;
