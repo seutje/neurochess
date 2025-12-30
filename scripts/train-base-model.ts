@@ -2,8 +2,8 @@ import { Chess, Move } from 'chess.js';
 import '@tensorflow/tfjs-node';
 import * as tf from '@tensorflow/tfjs';
 import path from 'node:path';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { createTinyZeroModel } from '../services/model';
+import { access, mkdir, writeFile } from 'node:fs/promises';
+import { compileTinyZeroModel, createTinyZeroModel } from '../services/model';
 import { boardToTensor } from '../services/tensorUtils';
 import { runMcts } from '../services/mcts';
 import { moveToIndex } from '../services/moveEncoding';
@@ -66,6 +66,7 @@ Options:
   --opponent-sims <n>     MCTS simulations for opponent (default: 80)
   --batch-size <n>        Batch size per update (default: ${BATCH_SIZE})
   --out <dir>             Output directory (default: public/models/base)
+  --reset                 Reset to a fresh model instead of loading the last base model
   --help, -h              Show this help
 `);
   process.exit(0);
@@ -91,6 +92,7 @@ const options: TrainOptions = {
   opponentSimulations: Math.max(1, Math.floor(readNumber('opponent-sims', readPositionalNumber(2) ?? 80))),
   batchSize: Math.max(1, Math.floor(readNumber('batch-size', BATCH_SIZE)))
 };
+const resetModel = args.includes('--reset');
 
 const sampleFromPolicy = (policy: number[]): number => {
   let threshold = Math.random();
@@ -175,7 +177,23 @@ const trainBaseModel = async () => {
   }
   await tf.ready();
 
-  const model = createTinyZeroModel();
+  const resolvedOutDir = path.resolve(process.cwd(), options.outDir);
+  const modelPath = path.join(resolvedOutDir, 'model.json');
+  let model: tf.LayersModel;
+  if (resetModel) {
+    console.log('Reset flag detected; starting from a fresh model.');
+    model = createTinyZeroModel();
+  } else {
+    try {
+      await access(modelPath);
+      const loaded = await tf.loadLayersModel(`file://${modelPath}`);
+      model = compileTinyZeroModel(loaded);
+      console.log(`Loaded base model from ${options.outDir}`);
+    } catch (err) {
+      console.warn('Base model not found; using fresh weights.', err);
+      model = createTinyZeroModel();
+    }
+  }
 
   const trainingConfig: MctsConfig = {
     simulations: options.trainSimulations,

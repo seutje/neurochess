@@ -7,3 +7,7 @@
 
    For custom settings (note the `--` separator):
    `npm run train:base -- --games 2 --train-sims 50 --opponent-sims 50`
+
+   By default training resumes from the last base model in `public/models/base`.
+   Use `--reset` to start fresh:
+   `npm run train:base -- --reset`
