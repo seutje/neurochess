@@ -21,11 +21,11 @@ const INITIAL_METRICS: TrainingMetrics = {
 
 // Simplified MCTS Opponent (Black)
 // Evaluates positions based on material and simple safety to simulate a fixed-strength engine.
-const getMCTSMove = (game: Chess): string => {
+const getMCTSMove = (game: Chess): Move | null => {
     // Clone to ensure we don't mess up main game state if something throws or if undo fails
     const simulation = new Chess(game.fen());
     const moves = simulation.moves({ verbose: true });
-    if (moves.length === 0) return '';
+    if (moves.length === 0) return null;
     
     const pieceValues: Record<string, number> = { p: 1, n: 3, b: 3.2, r: 5, q: 9, k: 0 };
     
@@ -59,18 +59,18 @@ const getMCTSMove = (game: Chess): string => {
 
     // 1-ply search with noise
     const candidates = moves.map(m => {
-        simulation.move(m.san);
+        simulation.move({ from: m.from, to: m.to, promotion: m.promotion });
         const score = evaluate(simulation.fen());
         simulation.undo();
         // Add randomness to simulate MCTS rollout variance/imperfection
-        return { san: m.san, score: score + (Math.random() * 0.5 - 0.25) };
+        return { move: m, score: score + (Math.random() * 0.5 - 0.25) };
     });
     
     // Sort descending (Black wants max score)
     candidates.sort((a,b) => b.score - a.score);
     
     // Pick top move
-    return candidates[0].san;
+    return candidates[0].move;
 };
 
 const App: React.FC = () => {
@@ -148,7 +148,8 @@ const App: React.FC = () => {
     const movesWithProbs: MoveProbability[] = simulatedProbabilities.map(mp => ({
         san: mp.move.san,
         probability: totalWeight > 0 ? mp.weight / totalWeight : 0,
-        isBest: false
+        isBest: false,
+        move: mp.move
     })).sort((a, b) => b.probability - a.probability);
 
     if (movesWithProbs.length > 0) movesWithProbs[0].isBest = true;
@@ -156,36 +157,39 @@ const App: React.FC = () => {
     // 4. Update Visuals
     setTopMoves(movesWithProbs.slice(0, 10));
     
-    const newHeatmap: HeatmapSquare[] = movesWithProbs.map((mp, i) => {
-        const moveObj = legalMoves.find(m => m.san === mp.san);
-        return {
-            square: moveObj ? moveObj.to : '',
-            intensity: mp.probability
-        };
-    }).filter(h => h.square !== '');
+    const newHeatmap: HeatmapSquare[] = movesWithProbs.map((mp) => ({
+        square: mp.move.to,
+        intensity: mp.probability
+    })).filter(h => h.square !== '');
     setHeatmap(newHeatmap);
 
     // 5. Select Move based on Turn
     const turn = gameRef.current.turn();
-    let moveSAN = '';
+    let selectedMove: Move | null = null;
 
     if (turn === 'w') {
         // --- WHITE: NEURAL NETWORK ---
         // Greedy selection from the "Policy"
-        if (movesWithProbs.length > 0) {
-            moveSAN = movesWithProbs[0].san;
-        }
+        selectedMove = movesWithProbs[0]?.move ?? null;
     } else {
         // --- BLACK: MCTS OPPONENT ---
-        moveSAN = getMCTSMove(gameRef.current);
+        selectedMove = getMCTSMove(gameRef.current);
     }
 
-    if (moveSAN) {
+    if (selectedMove) {
         try {
-            gameRef.current.move(moveSAN);
+            const applied = gameRef.current.move({
+                from: selectedMove.from,
+                to: selectedMove.to,
+                promotion: selectedMove.promotion
+            });
+            if (!applied) {
+                console.warn("Move rejected by engine:", selectedMove);
+                return;
+            }
             setGame(new Chess(gameRef.current.fen())); // Update UI
         } catch (e) {
-            console.error("Invalid move attempted:", moveSAN, e);
+            console.error("Invalid move attempted:", selectedMove, e);
         }
     }
 

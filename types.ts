@@ -1,3 +1,5 @@
+import type { Move } from 'chess.js';
+
 export enum PlayerType {
   HUMAN = 'HUMAN',
   AI_TRAINING = 'AI_TRAINING',
@@ -13,10 +15,13 @@ export interface TrainingMetrics {
   entropy: number;
 }
 
+import type { Move } from 'chess.js';
+
 export interface MoveProbability {
   san: string;
   probability: number;
   isBest: boolean;
+  move: Move;
 }
 
 export interface HeatmapSquare {
