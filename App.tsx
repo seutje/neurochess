@@ -98,9 +98,11 @@ const App: React.FC = () => {
         await tf.ready();
         let newModel: tf.LayersModel;
         try {
-          const loaded = await tf.loadLayersModel('/models/base/model.json');
+          const baseRoot = new URL(import.meta.env.BASE_URL ?? '/', window.location.origin);
+          const baseModelUrl = new URL('models/base/model.json', baseRoot).toString();
+          const loaded = await tf.loadLayersModel(baseModelUrl);
           newModel = compileTinyZeroModel(loaded);
-          console.info('Loaded base model from /models/base/model.json');
+          console.info(`Loaded base model from ${baseModelUrl}`);
         } catch (loadErr) {
           newModel = createTinyZeroModel();
           console.warn('Base model not found; using fresh weights.', loadErr);
