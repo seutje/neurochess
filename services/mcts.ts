@@ -59,7 +59,8 @@ const selectChild = (node: MctsNode, cPuct: number): MctsNode => {
 
   node.children.forEach((child) => {
     const u = cPuct * child.prior * Math.sqrt(parentVisits) / (1 + child.visitCount);
-    const score = child.qValue + u;
+    // qValue is from the child's side-to-move perspective; flip for parent.
+    const score = -child.qValue + u;
     if (score > bestScore) {
       bestScore = score;
       bestChild = child;
