@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NeuroChess Web</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+            },
+            colors: {
+              neuro: {
+                900: '#0a0a0f',
+                800: '#13131f',
+                700: '#1c1c2e',
+                600: '#2a2a40',
+                500: '#3e3e5e',
+                400: '#5c5c8a',
+                accent: '#00f0ff',
+                danger: '#ff003c',
+                success: '#00ff9d',
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body {
+        background-color: #0a0a0f;
+        color: #e0e0e0;
+      }
+      /* Custom scrollbar for cyberpunk feel */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #13131f; 
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #3e3e5e; 
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #5c5c8a; 
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "recharts": "https://esm.sh/recharts@^3.6.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "chess.js": "https://esm.sh/chess.js@^1.4.0",
+    "react-chessboard": "https://esm.sh/react-chessboard@^5.8.6",
+    "@tensorflow/tfjs": "https://esm.sh/@tensorflow/tfjs@^4.22.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>

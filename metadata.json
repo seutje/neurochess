@@ -1,0 +1,5 @@
+{
+  "name": "NeuroChess Web",
+  "description": "A browser-based self-training Chess AI using TensorFlow.js with real-time training visualization.",
+  "requestFramePermissions": []
+}
