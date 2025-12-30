@@ -28,6 +28,14 @@ const residualBlock = (input: tf.SymbolicTensor): tf.SymbolicTensor => {
   return x;
 };
 
+export const compileTinyZeroModel = (model: tf.LayersModel): tf.LayersModel => {
+  model.compile({
+    optimizer: tf.train.sgd(LEARNING_RATE),
+    loss: ['categoricalCrossentropy', 'meanSquaredError']
+  });
+  return model;
+};
+
 export const createTinyZeroModel = (): tf.LayersModel => {
   const input = tf.input({ shape: [8, 8, INPUT_PLANES] });
 
@@ -90,11 +98,5 @@ export const createTinyZeroModel = (): tf.LayersModel => {
   }).apply(v) as tf.SymbolicTensor;
 
   const model = tf.model({ inputs: input, outputs: [policyOutput, valueOutput] });
-  
-  model.compile({
-    optimizer: tf.train.sgd(LEARNING_RATE),
-    loss: ['categoricalCrossentropy', 'meanSquaredError']
-  });
-
-  return model;
+  return compileTinyZeroModel(model);
 };

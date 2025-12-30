@@ -6,7 +6,7 @@ import { Activity, Brain, Cpu, Play, StopCircle, RefreshCw, Circle } from 'lucid
 import { HeatmapBoard } from './components/HeatmapBoard';
 import { LossChart, EntropyChart } from './components/Charts';
 import { MoveAnalysis } from './components/MoveAnalysis';
-import { createTinyZeroModel } from './services/model';
+import { compileTinyZeroModel, createTinyZeroModel } from './services/model';
 import { boardToTensor } from './services/tensorUtils';
 import { runMcts } from './services/mcts';
 import { moveToIndex } from './services/moveEncoding';
@@ -83,7 +83,15 @@ const App: React.FC = () => {
       setModelError(null);
       try {
         await tf.ready();
-        const newModel = createTinyZeroModel();
+        let newModel: tf.LayersModel;
+        try {
+          const loaded = await tf.loadLayersModel('/models/base/model.json');
+          newModel = compileTinyZeroModel(loaded);
+          console.info('Loaded base model from /models/base/model.json');
+        } catch (loadErr) {
+          newModel = createTinyZeroModel();
+          console.warn('Base model not found; using fresh weights.', loadErr);
+        }
         setModel(newModel);
         setModelStatus('ready');
         console.log("TinyZero Model Initialized: ", newModel.summary());
