@@ -282,9 +282,10 @@ const trainBaseModel = async () => {
       replayBuffer.splice(0, replayBuffer.length - MAX_REPLAY_BUFFER);
     }
 
-    if (replayBuffer.length >= options.batchSize) {
+    const effectiveBatchSize = Math.min(options.batchSize, replayBuffer.length);
+    if (effectiveBatchSize > 0) {
       const batch: TrainingSample[] = [];
-      for (let i = 0; i < options.batchSize; i++) {
+      for (let i = 0; i < effectiveBatchSize; i++) {
         const sampleIndex = Math.floor(Math.random() * replayBuffer.length);
         batch.push(replayBuffer[sampleIndex]);
       }

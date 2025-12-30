@@ -277,9 +277,10 @@ const stepTraining = async () => {
     let policyLoss = currentMetrics.policyLoss;
     let valueLoss = currentMetrics.valueLoss;
 
-    if (replayBuffer.length >= BATCH_SIZE) {
+    const effectiveBatchSize = Math.min(BATCH_SIZE, replayBuffer.length);
+    if (effectiveBatchSize > 0) {
       const batch: TrainingSample[] = [];
-      for (let i = 0; i < BATCH_SIZE; i++) {
+      for (let i = 0; i < effectiveBatchSize; i++) {
         const sampleIndex = Math.floor(Math.random() * replayBuffer.length);
         batch.push(replayBuffer[sampleIndex]);
       }
