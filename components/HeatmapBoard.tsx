@@ -1,5 +1,5 @@
 import React from 'react';
-import { Chessboard } from 'react-chessboard';
+import { Chessboard, fenStringToPositionObject } from 'react-chessboard';
 import { Chess } from 'chess.js';
 import { HeatmapSquare } from '../types';
 
@@ -12,6 +12,9 @@ interface Props {
 }
 
 export const HeatmapBoard: React.FC<Props> = ({ game, heatmap, onPieceDrop, isBot, statusText }) => {
+  const fen = game.fen();
+  const piecePlacement = fen.split(' ')[0];
+  const position = React.useMemo(() => fenStringToPositionObject(piecePlacement, 8, 8), [piecePlacement]);
   // Convert custom heatmap array to react-chessboard customSquareStyles
   const customSquareStyles = React.useMemo(() => {
     const styles: Record<string, React.CSSProperties> = {};
@@ -50,12 +53,15 @@ export const HeatmapBoard: React.FC<Props> = ({ game, heatmap, onPieceDrop, isBo
       <div className={`absolute -inset-1 bg-gradient-to-r from-neuro-accent to-purple-600 rounded-lg blur opacity-20 group-hover:opacity-40 transition duration-1000 ${isBot ? 'animate-pulse' : ''}`}></div>
       <div className="relative bg-neuro-900 rounded-lg p-1 border border-neuro-600 shadow-2xl">
         <ChessboardComponent 
-            position={game.fen()} 
-            onPieceDrop={onPieceDrop}
-            customSquareStyles={customSquareStyles}
-            customDarkSquareStyle={{ backgroundColor: '#2a2a40' }}
-            customLightSquareStyle={{ backgroundColor: '#3e3e5e' }}
-            arePiecesDraggable={!isBot}
+            key={piecePlacement}
+            options={{
+              position,
+              onPieceDrop,
+              squareStyles: customSquareStyles,
+              darkSquareStyle: { backgroundColor: '#2a2a40' },
+              lightSquareStyle: { backgroundColor: '#3e3e5e' },
+              allowDragging: !isBot
+            }}
         />
         {statusText ? (
           <div className="absolute top-2 left-2 bg-neuro-900/70 text-neuro-200 text-xs font-mono px-2 py-1 rounded border border-neuro-700">

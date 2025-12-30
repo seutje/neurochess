@@ -94,7 +94,8 @@ const App: React.FC = () => {
         }
         setModel(newModel);
         setModelStatus('ready');
-        console.log("TinyZero Model Initialized: ", newModel.summary());
+        newModel.summary();
+        console.log("TinyZero Model Initialized.");
       } catch (err) {
         console.error('Model init failed:', err);
         setModelStatus('error');
