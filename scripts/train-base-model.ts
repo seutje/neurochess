@@ -277,7 +277,8 @@ const trainBaseModel = async () => {
   const opponentConfig: MctsConfig = {
     simulations: options.opponentSimulations,
     cPuct: 1.2,
-    temperature: 1.1
+    temperature: 1.1,
+    useHeuristic: true
   };
 
   let gamesPlayed = 0;
@@ -321,8 +322,7 @@ const trainBaseModel = async () => {
           value: 0,
           bootstrapValue: mcts.value
         });
-        const sampledIndex = sampleFromPolicy(mcts.policy.map((entry) => entry.probability));
-        selectedMove = mcts.policy[sampledIndex]?.move ?? mcts.move;
+        selectedMove = mcts.move;
       }
 
       let moved = false;
