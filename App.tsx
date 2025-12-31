@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Chess } from 'chess.js';
-import { Activity, Brain, Cpu, Play, StopCircle, RefreshCw, Circle } from 'lucide-react';
+import { Activity, Brain, Cpu, Play, StopCircle, RefreshCw, Circle, Flag } from 'lucide-react';
 
 import { HeatmapBoard } from './components/HeatmapBoard';
 import { MctsVisualization } from './components/MctsVisualization';
@@ -163,6 +163,7 @@ const App: React.FC = () => {
   })();
   const checkStatus = game.isCheckmate() ? 'CHECKMATE' : game.isCheck() ? 'CHECK' : null;
   const checkStatusText = checkStatus ? `${game.turn() === 'w' ? 'WHITE' : 'BLACK'} ${checkStatus}` : null;
+  const canForfeit = !isTraining && !isPaused && modelStatus === 'ready';
   const loadingLabel =
     modelPhase === 'downloading'
       ? 'DOWNLOADING MODEL'
@@ -175,6 +176,7 @@ const App: React.FC = () => {
   // UI Handlers
   const handleStartTraining = () => {
     if (modelStatus !== 'ready') return;
+    handleReset();
     setIsTraining(true);
     workerRef.current?.postMessage({ type: 'start' });
   };
@@ -200,6 +202,20 @@ const App: React.FC = () => {
       setTopMoves([]);
       setMoveHistory([]);
       workerRef.current?.postMessage({ type: 'reset' });
+  };
+
+  const handleForfeit = () => {
+      const winner = 'BLACK';
+      setWinBanner(`${winner} WINS`);
+      setIsPaused(true);
+      pausedRef.current = true;
+      if (pauseTimeoutRef.current) {
+        window.clearTimeout(pauseTimeoutRef.current);
+        pauseTimeoutRef.current = null;
+      }
+      pauseTimeoutRef.current = window.setTimeout(() => {
+        handleReset();
+      }, 1200);
   };
 
   const handlePieceDrop = ({
@@ -387,9 +403,21 @@ const App: React.FC = () => {
                         </span>
                     </div>
                 </div>
-                <button onClick={handleReset} className="text-gray-500 hover:text-white transition">
-                    <RefreshCw size={18} />
-                </button>
+                <div className="flex items-center gap-3">
+                    <button
+                      onClick={handleForfeit}
+                      disabled={!canForfeit}
+                      className={`transition ${
+                        canForfeit ? 'text-gray-500 hover:text-neuro-danger' : 'text-gray-700 cursor-not-allowed'
+                      }`}
+                      aria-label="Forfeit game"
+                    >
+                      <Flag size={18} />
+                    </button>
+                    <button onClick={handleReset} className="text-gray-500 hover:text-white transition">
+                        <RefreshCw size={18} />
+                    </button>
+                </div>
             </div>
         </div>
 
