@@ -23,6 +23,7 @@ type WorkerStatusMessage = {
   status: WorkerStatus;
   error?: string;
   backend?: string;
+  phase?: string;
 };
 
 type WorkerStateMessage = {
@@ -45,6 +46,7 @@ const App: React.FC = () => {
   const [modelStatus, setModelStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [modelError, setModelError] = useState<string | null>(null);
   const [backend, setBackend] = useState<string>('unknown');
+  const [modelPhase, setModelPhase] = useState<string>('initializing');
   const [difficulty, setDifficulty] = useState<MctsDifficulty>('easy');
   const [isMctsThinking, setIsMctsThinking] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -82,6 +84,7 @@ const App: React.FC = () => {
         setModelStatus(message.status);
         setModelError(message.status === 'error' ? message.error ?? 'Unknown error' : null);
         if (message.backend) setBackend(message.backend);
+        if (message.phase) setModelPhase(message.phase);
         return;
       }
       if (pausedRef.current) {
@@ -160,6 +163,14 @@ const App: React.FC = () => {
   })();
   const checkStatus = game.isCheckmate() ? 'CHECKMATE' : game.isCheck() ? 'CHECK' : null;
   const checkStatusText = checkStatus ? `${game.turn() === 'w' ? 'WHITE' : 'BLACK'} ${checkStatus}` : null;
+  const loadingLabel =
+    modelPhase === 'downloading'
+      ? 'DOWNLOADING MODEL'
+      : modelPhase === 'warming'
+        ? 'WARMING UP'
+        : modelPhase === 'building'
+          ? 'BUILDING MODEL'
+          : 'INITIALIZING';
 
   // UI Handlers
   const handleStartTraining = () => {
@@ -247,6 +258,23 @@ const App: React.FC = () => {
              </button>
         </div>
       </header>
+
+      {modelStatus === 'loading' ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-neuro-900/70 backdrop-blur-sm">
+          <div className="w-[320px] max-w-[80vw] border border-neuro-700 bg-neuro-800/90 px-6 py-5 shadow-[0_0_24px_rgba(246,201,69,0.2)]">
+            <div className="text-xs font-mono text-gray-400 mb-3 uppercase tracking-wider">
+              Booting Neural Core
+            </div>
+            <div className="flex items-center justify-between text-[11px] font-mono text-gray-500 mb-2">
+              <span>STATUS</span>
+              <span>{loadingLabel}</span>
+            </div>
+            <div className="h-2 bg-neuro-900 border border-neuro-700 overflow-hidden">
+              <div className="h-full w-1/3 bg-neuro-accent animate-loading-bar"></div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:h-[calc(100vh-140px)] h-auto">

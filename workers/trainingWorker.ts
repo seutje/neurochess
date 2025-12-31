@@ -85,6 +85,7 @@ type StatusPayload = {
   status: WorkerStatus;
   error?: string;
   backend?: string;
+  phase?: string;
 };
 
 type StatePayload = {
@@ -105,6 +106,7 @@ let model: tf.LayersModel | null = null;
 let modelStatus: WorkerStatus = 'loading';
 let modelError: string | undefined;
 let backend: string | undefined;
+let modelPhase: string | undefined;
 
 let difficulty: MctsDifficulty = 'easy';
 let isTraining = false;
@@ -142,7 +144,8 @@ const postStatus = () => {
     type: 'status',
     status: modelStatus,
     error: modelError,
-    backend
+    backend,
+    phase: modelPhase
   };
   ctx.postMessage(payload);
 };
@@ -520,20 +523,27 @@ const stopTraining = () => {
 const initModel = async (baseModelUrl: string) => {
   modelStatus = 'loading';
   modelError = undefined;
+  modelPhase = 'initializing';
   postStatus();
 
   try {
     await initBackend();
     let newModel: tf.LayersModel;
     try {
+      modelPhase = 'downloading';
+      postStatus();
       const loaded = await tf.loadLayersModel(baseModelUrl);
       newModel = compileTinyZeroModel(loaded);
       console.info(`Loaded base model from ${baseModelUrl}`);
     } catch (loadErr) {
+      modelPhase = 'building';
+      postStatus();
       newModel = createTinyZeroModel();
       console.warn('Base model not found; using fresh weights.', loadErr);
     }
     model = newModel;
+    modelPhase = 'warming';
+    postStatus();
     const warmupOutputs = tf.tidy(() => {
       const warmupInput = tf.zeros([1, 8, 8, INPUT_PLANES]);
       return newModel.predict(warmupInput) as tf.Tensor[];
@@ -544,6 +554,7 @@ const initModel = async (baseModelUrl: string) => {
       warmupOutputs.dispose();
     }
     modelStatus = 'ready';
+    modelPhase = undefined;
     postStatus();
     postState();
   } catch (err) {
