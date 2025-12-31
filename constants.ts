@@ -21,9 +21,9 @@ export const MAX_GAME_MOVES = 100;
 
 // Chart Colors
 export const COLORS = {
-  policy: '#00f0ff',
-  value: '#ff003c',
-  entropy: '#00ff9d',
-  grid: '#2a2a40',
-  text: '#a0a0b0'
+  policy: '#f6c945',
+  value: '#ffffff',
+  entropy: '#ffe077',
+  grid: '#2b2b2b',
+  text: '#f0f0f0'
 };

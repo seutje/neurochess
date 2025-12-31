@@ -145,7 +145,7 @@ const App: React.FC = () => {
       {/* Header */}
       <header className="flex justify-between items-center mb-8 border-b border-neuro-700 pb-4">
         <div className="flex items-center space-x-3">
-            <div className="bg-neuro-accent p-2 rounded-lg text-neuro-900 shadow-[0_0_15px_rgba(0,240,255,0.5)]">
+            <div className="bg-neuro-accent p-2 text-neuro-900 shadow-[0_0_15px_rgba(246,201,69,0.5)]">
                 <Brain size={24} />
             </div>
             <div>
@@ -176,7 +176,7 @@ const App: React.FC = () => {
                     setDifficulty(nextDifficulty);
                     workerRef.current?.postMessage({ type: 'setDifficulty', difficulty: nextDifficulty });
                   }}
-                  className="bg-neuro-800 border border-neuro-600 text-xs font-mono text-gray-200 rounded px-2 py-1"
+                  className="bg-neuro-800 border border-neuro-600 text-xs font-mono text-gray-200 px-2 py-1"
                 >
                   <option value="easy">Easy</option>
                   <option value="medium">Medium</option>
@@ -186,10 +186,10 @@ const App: React.FC = () => {
              <button 
                 onClick={isTraining ? handleStopTraining : handleStartTraining}
                 disabled={!isTraining && modelStatus !== 'ready'}
-                className={`flex items-center gap-2 px-6 py-2 rounded-full font-bold transition-all duration-300 ${
+                className={`flex items-center gap-2 px-6 py-2 font-bold transition-all duration-300 ${
                     isTraining 
                     ? 'bg-neuro-danger/10 text-neuro-danger border border-neuro-danger hover:bg-neuro-danger hover:text-white' 
-                    : 'bg-neuro-accent text-neuro-900 hover:shadow-[0_0_20px_rgba(0,240,255,0.6)]'
+                    : 'bg-neuro-accent text-neuro-900 hover:shadow-[0_0_20px_rgba(246,201,69,0.6)]'
                 }`}
              >
                 {isTraining ? <><StopCircle size={18} /> STOP TRAINING</> : <><Play size={18} /> START SELF-PLAY</>}
@@ -219,9 +219,9 @@ const App: React.FC = () => {
                 />
             </div>
             {/* Status Bar under board */}
-            <div className="mt-4 flex justify-between items-center bg-neuro-800 p-3 rounded-lg border border-neuro-700">
+            <div className="mt-4 flex justify-between items-center bg-neuro-800 p-3 border border-neuro-700">
                 <div className="flex items-center gap-6">
-                    <span className={`w-2 h-2 rounded-full ${isTraining ? 'bg-neuro-success animate-pulse' : 'bg-gray-500'}`}></span>
+                    <span className={`w-2 h-2 ${isTraining ? 'bg-neuro-success animate-pulse' : 'bg-gray-500'}`}></span>
                     <div className="flex flex-col">
                          <span className="text-xs font-mono text-gray-400">STATUS</span>
                          <span className="text-sm font-bold font-mono text-gray-200">
@@ -230,7 +230,7 @@ const App: React.FC = () => {
                                     <span>EVAL:</span>
                                     <span className="text-white flex items-center gap-1"><Circle size={8} fill="white" /> NET</span>
                                     <span className="text-gray-500">vs</span>
-                                    <span className="text-black bg-gray-600 rounded px-1 flex items-center gap-1"><Circle size={8} fill="black" /> MCTS</span>
+                                    <span className="text-neuro-900 bg-neuro-400 px-1 flex items-center gap-1"><Circle size={8} fill="black" /> MCTS</span>
                                 </span>
                             ) : 'IDLE'}
                         </span>
@@ -242,7 +242,7 @@ const App: React.FC = () => {
                         <span className="text-xs font-mono text-gray-400">TURN</span>
                         <span className="text-sm font-bold font-mono flex items-center gap-2">
                             <span
-                              className={`w-2 h-2 rounded-full border border-gray-500 ${
+                              className={`w-2 h-2 border border-gray-500 ${
                                 game.turn() === 'w' ? 'bg-white' : 'bg-gray-900'
                               }`}
                             ></span>
@@ -259,7 +259,7 @@ const App: React.FC = () => {
                           }`}
                         >
                             <span
-                              className={`w-2 h-2 rounded-full ${
+                              className={`w-2 h-2 ${
                                 isMctsThinking ? 'bg-neuro-accent animate-pulse' : 'bg-gray-600'
                               }`}
                             ></span>
@@ -277,21 +277,21 @@ const App: React.FC = () => {
         <div className="lg:col-span-6 xl:col-span-4 flex flex-col space-y-4">
             {/* Quick Stats Grid */}
             <div className="grid grid-cols-2 gap-4">
-                <div className="bg-neuro-800 p-3 rounded-lg border border-neuro-700">
+                <div className="bg-neuro-800 p-3 border border-neuro-700">
                     <div className="text-xs text-neuro-400 font-mono mb-1">GAMES PLAYED</div>
                     <div className="text-2xl font-bold font-mono">{currentMetrics.gamesPlayed}</div>
                 </div>
-                <div className="bg-neuro-800 p-3 rounded-lg border border-neuro-700">
+                <div className="bg-neuro-800 p-3 border border-neuro-700">
                     <div className="text-xs text-neuro-400 font-mono mb-1">WIN RATE (vs MCTS)</div>
                     <div className="text-2xl font-bold font-mono text-neuro-success">
                         {(currentMetrics.winRate * 100).toFixed(1)}%
                     </div>
                 </div>
-                <div className="bg-neuro-800 p-3 rounded-lg border border-neuro-700">
+                <div className="bg-neuro-800 p-3 border border-neuro-700">
                     <div className="text-xs text-neuro-400 font-mono mb-1">EPOCH</div>
                     <div className="text-2xl font-bold font-mono text-neuro-accent">{currentMetrics.epoch}</div>
                 </div>
-                <div className="bg-neuro-800 p-3 rounded-lg border border-neuro-700">
+                <div className="bg-neuro-800 p-3 border border-neuro-700">
                     <div className="text-xs text-neuro-400 font-mono mb-1">VALUE LOSS</div>
                     <div className="text-2xl font-bold font-mono text-neuro-danger">
                         {currentMetrics.valueLoss.toFixed(4)}
@@ -302,7 +302,7 @@ const App: React.FC = () => {
             {/* Charts */}
             <LossChart data={metricsHistory} />
             <EntropyChart data={metricsHistory} />
-            <div className="bg-neuro-800 rounded-lg p-3 border border-neuro-600 flex flex-col min-h-[160px] max-h-56">
+            <div className="bg-neuro-800 p-3 border border-neuro-600 flex flex-col min-h-[160px] max-h-56">
                 <h3 className="text-xs font-mono text-gray-400 mb-2 uppercase tracking-wider">Moves Log</h3>
                 <div className="flex-1 overflow-y-auto pr-1 space-y-1">
                   {moveHistory.length === 0 ? (
@@ -332,7 +332,7 @@ const App: React.FC = () => {
         <div className="lg:col-span-12 xl:col-span-3 h-full flex flex-col min-h-0">
             <MoveAnalysis moves={topMoves} />
             
-            <div className="mt-4 bg-neuro-800/70 p-4 rounded-lg border border-neuro-700 shrink-0">
+            <div className="mt-4 bg-neuro-800/70 p-4 border border-neuro-700 shrink-0">
                 <div className="flex items-center gap-2 mb-2">
                     <Activity size={16} className="text-neuro-400" />
                     <h4 className="text-sm font-bold text-gray-300">Performance</h4>
@@ -371,7 +371,7 @@ const App: React.FC = () => {
                 </div>
             </div>
 
-            <div className="mt-4 bg-neuro-800/50 p-4 rounded-lg border border-neuro-700 border-dashed shrink-0">
+            <div className="mt-4 bg-neuro-800/50 p-4 border border-neuro-700 border-dashed shrink-0">
                 <div className="flex items-center gap-2 mb-2">
                     <Activity size={16} className="text-neuro-400" />
                     <h4 className="text-sm font-bold text-gray-300">Architecture Info</h4>

@@ -9,7 +9,7 @@ interface ChartProps {
 
 export const LossChart: React.FC<ChartProps> = ({ data }) => {
   return (
-    <div className="h-48 w-full bg-neuro-800 rounded-lg p-2 border border-neuro-600 flex flex-col">
+    <div className="h-48 w-full bg-neuro-800 p-2 border border-neuro-600 flex flex-col">
       <h3 className="text-xs font-mono text-gray-400 mb-2 uppercase tracking-wider">Loss History</h3>
       <div className="flex-1 min-h-0">
         <ResponsiveContainer width="100%" height="100%">
@@ -18,7 +18,7 @@ export const LossChart: React.FC<ChartProps> = ({ data }) => {
             <XAxis dataKey="epoch" hide />
             <YAxis stroke={COLORS.text} fontSize={10} width={30} />
             <Tooltip 
-              contentStyle={{ backgroundColor: '#1c1c2e', border: '1px solid #3e3e5e' }}
+              contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #3a3a3a' }}
               itemStyle={{ fontSize: '12px' }}
             />
             <Line 
@@ -46,7 +46,7 @@ export const LossChart: React.FC<ChartProps> = ({ data }) => {
 
 export const EntropyChart: React.FC<ChartProps> = ({ data }) => {
   return (
-    <div className="h-32 w-full bg-neuro-800 rounded-lg p-2 border border-neuro-600 mt-2 flex flex-col">
+    <div className="h-32 w-full bg-neuro-800 p-2 border border-neuro-600 mt-2 flex flex-col">
       <h3 className="text-xs font-mono text-gray-400 mb-2 uppercase tracking-wider">Network Entropy (Uncertainty)</h3>
       <div className="flex-1 min-h-0">
         <ResponsiveContainer width="100%" height="100%">
@@ -55,7 +55,7 @@ export const EntropyChart: React.FC<ChartProps> = ({ data }) => {
             <XAxis dataKey="epoch" hide />
             <YAxis stroke={COLORS.text} fontSize={10} width={30} domain={[0, 'auto']} />
             <Tooltip 
-              contentStyle={{ backgroundColor: '#1c1c2e', border: '1px solid #3e3e5e' }}
+              contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #3a3a3a' }}
               itemStyle={{ fontSize: '12px' }}
             />
             <Area 

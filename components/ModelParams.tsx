@@ -28,10 +28,10 @@ const SummaryBar: React.FC<{
   return (
     <div className="flex items-center gap-3">
       <div className="w-10 text-[10px] font-mono text-gray-500 uppercase">{label}</div>
-      <div className="relative flex-1 h-2 bg-neuro-900/60 rounded">
+      <div className="relative flex-1 h-2 bg-neuro-900/60">
         <div className="absolute inset-y-0 left-1/2 w-px bg-neuro-700/70" />
         <div
-          className="absolute h-2 rounded"
+          className="absolute h-2"
           style={{
             left: `${minPct}%`,
             width: `${barWidth}%`,
@@ -39,7 +39,7 @@ const SummaryBar: React.FC<{
           }}
         />
         <div
-          className="absolute -top-0.5 w-1.5 h-1.5 rounded-full border border-neuro-900"
+          className="absolute -top-0.5 w-1.5 h-1.5 border border-neuro-900"
           style={{
             left: `${meanPct}%`,
             backgroundColor: '#ffffff'
@@ -56,7 +56,7 @@ const SummaryBar: React.FC<{
 export const ModelParams: React.FC<Props> = ({ layers }) => {
   if (!layers.length) {
     return (
-      <div className="bg-neuro-800/60 p-4 rounded-lg border border-neuro-700">
+      <div className="bg-neuro-800/60 p-4 border border-neuro-700">
         <h4 className="text-sm font-bold text-gray-300 mb-2">Weights & Biases</h4>
         <div className="text-xs font-mono text-gray-500">Waiting for model parameters...</div>
       </div>
@@ -64,7 +64,7 @@ export const ModelParams: React.FC<Props> = ({ layers }) => {
   }
 
   return (
-    <div className="bg-neuro-800/60 p-4 rounded-lg border border-neuro-700 flex flex-col min-h-0">
+    <div className="bg-neuro-800/60 p-4 border border-neuro-700 flex flex-col min-h-0">
       <div className="flex items-center justify-between mb-3">
         <h4 className="text-sm font-bold text-gray-300">Weights & Biases</h4>
         <span className="text-[10px] font-mono text-gray-500">{layers.length} layers</span>

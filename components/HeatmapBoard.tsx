@@ -27,10 +27,10 @@ export const HeatmapBoard: React.FC<Props> = ({ game, heatmap, onPieceDrop, isBo
     heatmap.forEach(({ square, intensity }) => {
       // Red for low probability/danger, Green for high probability/best move
       // But typically Policy is just "probability of picking this move".
-      // Let's use Neuro-Accent color (Cyan) opacity.
+      // Let's use Neuro-Accent color (yellow) opacity.
       mergeSquareStyle(square, {
-        backgroundColor: `rgba(0, 240, 255, ${intensity * 0.6})`,
-        boxShadow: `inset 0 0 10px rgba(0, 240, 255, ${intensity * 0.8})`
+        backgroundColor: `rgba(246, 201, 69, ${intensity * 0.6})`,
+        boxShadow: `inset 0 0 10px rgba(246, 201, 69, ${intensity * 0.8})`
       });
     });
 
@@ -59,8 +59,8 @@ export const HeatmapBoard: React.FC<Props> = ({ game, heatmap, onPieceDrop, isBo
 
   return (
     <div className="w-full h-full relative group">
-      <div className={`absolute -inset-1 bg-gradient-to-r from-neuro-accent to-purple-600 rounded-lg blur opacity-20 group-hover:opacity-40 transition duration-1000 ${isBot ? 'animate-pulse' : ''}`}></div>
-      <div className="relative bg-neuro-900 rounded-lg p-1 border border-neuro-600 shadow-2xl">
+      <div className={`absolute -inset-1 bg-gradient-to-r from-neuro-accent to-neuro-400 blur opacity-20 group-hover:opacity-40 transition duration-1000 ${isBot ? 'animate-pulse' : ''}`}></div>
+      <div className="relative bg-neuro-900 p-1 border border-neuro-600 shadow-2xl">
         <ChessboardComponent 
             options={{
               position,
@@ -68,13 +68,13 @@ export const HeatmapBoard: React.FC<Props> = ({ game, heatmap, onPieceDrop, isBo
               animationDurationInMs: 260,
               onPieceDrop,
               squareStyles: customSquareStyles,
-              darkSquareStyle: { backgroundColor: '#2a2a40' },
-              lightSquareStyle: { backgroundColor: '#3e3e5e' },
+              darkSquareStyle: { backgroundColor: '#1d1d1d' },
+              lightSquareStyle: { backgroundColor: '#2a2a2a' },
               allowDragging: !isBot
             }}
         />
         {statusText ? (
-          <div className="absolute top-2 left-2 bg-neuro-900/70 text-neuro-200 text-xs font-mono px-2 py-1 rounded border border-neuro-700">
+          <div className="absolute top-2 left-2 bg-neuro-900/70 text-neuro-200 text-xs font-mono px-2 py-1 border border-neuro-700">
             {statusText}
           </div>
         ) : null}

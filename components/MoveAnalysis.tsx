@@ -7,7 +7,7 @@ interface Props {
 
 export const MoveAnalysis: React.FC<Props> = ({ moves }) => {
   return (
-    <div className="bg-neuro-800 rounded-lg p-4 border border-neuro-600 flex-1 min-h-[320px] overflow-y-auto">
+    <div className="bg-neuro-800 p-4 border border-neuro-600 flex-1 min-h-[320px] overflow-y-auto">
       <h3 className="text-xs font-mono text-neuro-accent mb-4 uppercase tracking-wider border-b border-neuro-600 pb-2">
         Policy Head Analysis
       </h3>
@@ -24,9 +24,9 @@ export const MoveAnalysis: React.FC<Props> = ({ moves }) => {
                 </span>
                 </div>
                 <div className="flex items-center space-x-2 flex-1 mx-3">
-                <div className="h-1.5 flex-1 bg-neuro-900 rounded-full overflow-hidden">
+                <div className="h-1.5 flex-1 bg-neuro-900 overflow-hidden">
                     <div 
-                    className={`h-full rounded-full ${move.isBest ? 'bg-neuro-success' : 'bg-neuro-400'}`}
+                    className={`h-full ${move.isBest ? 'bg-neuro-success' : 'bg-neuro-400'}`}
                     style={{ width: `${move.probability * 100}%` }}
                     />
                 </div>
