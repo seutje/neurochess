@@ -41,9 +41,9 @@ const INITIAL_METRICS: TrainingMetrics = {
 };
 
 const MCTS_DIFFICULTY: Record<MctsDifficulty, MctsConfig> = {
-  easy: { simulations: 80, cPuct: 1.2, temperature: 1.1, logSimTiming: true },
-  medium: { simulations: 200, cPuct: 1.4, temperature: 0.8, logSimTiming: true },
-  hard: { simulations: 600, cPuct: 1.6, temperature: 0.4, logSimTiming: true }
+  easy: { simulations: 80, cPuct: 1.2, temperature: 1.1, useHeuristic: true, logSimTiming: true },
+  medium: { simulations: 200, cPuct: 1.4, temperature: 0.8, useHeuristic: true, logSimTiming: true },
+  hard: { simulations: 600, cPuct: 1.6, temperature: 0.4, useHeuristic: true, logSimTiming: true }
 };
 
 const TRAINING_CONFIG: MctsConfig = {

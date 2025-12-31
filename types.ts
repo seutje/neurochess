@@ -48,6 +48,7 @@ export interface MctsConfig {
   simulations: number;
   cPuct: number;
   temperature: number;
+  useHeuristic?: boolean;
   dirichletAlpha?: number;
   dirichletEpsilon?: number;
   logSimTiming?: boolean;

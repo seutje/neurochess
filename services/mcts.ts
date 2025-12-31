@@ -10,6 +10,17 @@ type MctsEval = {
   readbackMs: number;
 };
 
+const MATERIAL_VALUES: Record<string, number> = {
+  p: 1,
+  n: 3,
+  b: 3,
+  r: 5,
+  q: 9,
+  k: 0
+};
+
+const MAX_MATERIAL = 39;
+
 class MctsNode {
   prior: number;
   visitCount: number;
@@ -37,6 +48,25 @@ const getOutcomeValue = (game: Chess): number => {
     return -1;
   }
   return 0;
+};
+
+const clamp = (value: number, min: number, max: number): number => {
+  return Math.max(min, Math.min(max, value));
+};
+
+const evaluateHeuristic = (game: Chess): number => {
+  let whiteScore = 0;
+  let blackScore = 0;
+  for (const row of game.board()) {
+    for (const piece of row) {
+      if (!piece) continue;
+      const value = MATERIAL_VALUES[piece.type] ?? 0;
+      if (piece.color === 'w') whiteScore += value;
+      else blackScore += value;
+    }
+  }
+  const materialDiff = game.turn() === 'w' ? whiteScore - blackScore : blackScore - whiteScore;
+  return clamp(materialDiff / MAX_MATERIAL, -1, 1);
 };
 
 const evaluatePosition = async (game: Chess, model: tf.LayersModel): Promise<MctsEval> => {
@@ -145,17 +175,27 @@ export const runMcts = async (
     if (simulation.isGameOver()) {
       value = getOutcomeValue(simulation);
     } else {
-      const evalResult = await evaluatePosition(simulation, model);
-      readbackMsTotal += evalResult.readbackMs;
-      readbacks += 1;
-      lastReadbackMs = evalResult.readbackMs;
       const legalMoves = simulation.moves({ verbose: true });
-      const priors = legalMoves.map((move) => {
-        const index = moveToIndex(move);
-        return evalResult.policy[index] ?? 0;
-      });
-      const sum = priors.reduce((acc, p) => acc + p, 0);
-      let normalized = priors.map((p) => (sum > 0 ? p / sum : 1 / priors.length));
+      let valueResult = 0;
+      let normalized: number[] = [];
+
+      if (config.useHeuristic) {
+        valueResult = evaluateHeuristic(simulation);
+        normalized =
+          legalMoves.length > 0 ? new Array(legalMoves.length).fill(1 / legalMoves.length) : [];
+      } else {
+        const evalResult = await evaluatePosition(simulation, model);
+        readbackMsTotal += evalResult.readbackMs;
+        readbacks += 1;
+        lastReadbackMs = evalResult.readbackMs;
+        const priors = legalMoves.map((move) => {
+          const index = moveToIndex(move);
+          return evalResult.policy[index] ?? 0;
+        });
+        const sum = priors.reduce((acc, p) => acc + p, 0);
+        normalized = priors.map((p) => (sum > 0 ? p / sum : 1 / priors.length));
+        valueResult = evalResult.value;
+      }
       if (trainingNoise && node === root && config.dirichletAlpha && config.dirichletEpsilon) {
         normalized = addDirichletNoise(normalized, config.dirichletAlpha, config.dirichletEpsilon);
       }
@@ -163,7 +203,7 @@ export const runMcts = async (
         const key = `${move.from}${move.to}${move.promotion ?? ''}`;
         node.children.set(key, new MctsNode(normalized[idx], move));
       });
-      value = evalResult.value;
+      value = valueResult;
     }
 
     for (let p = path.length - 1; p >= 0; p--) {
