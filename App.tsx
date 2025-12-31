@@ -29,6 +29,7 @@ type WorkerStateMessage = {
   fen: string;
   heatmap: HeatmapSquare[];
   topMoves: MoveProbability[];
+  moveHistory: string[];
   currentMetrics: TrainingMetrics;
   metricsHistory: TrainingMetrics[];
   isMctsThinking: boolean;
@@ -50,6 +51,7 @@ const App: React.FC = () => {
   const [currentMetrics, setCurrentMetrics] = useState<TrainingMetrics>(INITIAL_METRICS);
   const [heatmap, setHeatmap] = useState<HeatmapSquare[]>([]);
   const [topMoves, setTopMoves] = useState<MoveProbability[]>([]);
+  const [moveHistory, setMoveHistory] = useState<string[]>([]);
   
   const workerRef = useRef<Worker | null>(null);
 
@@ -67,6 +69,7 @@ const App: React.FC = () => {
       setGame(new Chess(message.fen));
       setHeatmap(message.heatmap);
       setTopMoves(message.topMoves);
+      setMoveHistory(message.moveHistory);
       setCurrentMetrics(message.currentMetrics);
       setMetricsHistory(message.metricsHistory);
       setIsMctsThinking(message.isMctsThinking);
@@ -102,6 +105,7 @@ const App: React.FC = () => {
       setCurrentMetrics(INITIAL_METRICS);
       setHeatmap([]);
       setTopMoves([]);
+      setMoveHistory([]);
       workerRef.current?.postMessage({ type: 'reset' });
   };
 
@@ -263,6 +267,26 @@ const App: React.FC = () => {
             {/* Charts */}
             <LossChart data={metricsHistory} />
             <EntropyChart data={metricsHistory} />
+            <div className="bg-neuro-800 rounded-lg p-3 border border-neuro-600 flex flex-col min-h-[160px] max-h-56">
+                <h3 className="text-xs font-mono text-gray-400 mb-2 uppercase tracking-wider">Moves Log</h3>
+                <div className="flex-1 overflow-y-auto pr-1 space-y-1">
+                  {moveHistory.length === 0 ? (
+                    <p className="text-xs text-gray-500 font-mono italic">Awaiting first move...</p>
+                  ) : (
+                    Array.from({ length: Math.ceil(moveHistory.length / 2) }).map((_, idx) => {
+                      const whiteMove = moveHistory[idx * 2];
+                      const blackMove = moveHistory[idx * 2 + 1];
+                      return (
+                        <div key={`move-${idx}`} className="grid grid-cols-[32px_1fr_1fr] gap-2 text-xs font-mono">
+                          <span className="text-gray-500">{idx + 1}.</span>
+                          <span className="text-gray-200">{whiteMove ?? ''}</span>
+                          <span className="text-gray-400">{blackMove ?? ''}</span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+            </div>
         </div>
 
         {/* Right Column: Analysis (Moves) */}

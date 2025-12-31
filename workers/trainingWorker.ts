@@ -84,6 +84,7 @@ type StatePayload = {
   fen: string;
   heatmap: HeatmapSquare[];
   topMoves: MoveProbability[];
+  moveHistory: string[];
   currentMetrics: TrainingMetrics;
   metricsHistory: TrainingMetrics[];
   isMctsThinking: boolean;
@@ -107,6 +108,7 @@ let metricsHistory: TrainingMetrics[] = [];
 let currentMetrics: TrainingMetrics = { ...INITIAL_METRICS };
 let heatmap: HeatmapSquare[] = [];
 let topMoves: MoveProbability[] = [];
+let moveHistory: string[] = [];
 
 const postStatus = () => {
   const payload: StatusPayload = {
@@ -123,6 +125,7 @@ const postState = () => {
     fen: game.fen(),
     heatmap,
     topMoves,
+    moveHistory,
     currentMetrics,
     metricsHistory,
     isMctsThinking
@@ -174,6 +177,7 @@ const resetGameState = () => {
   game.reset();
   heatmap = [];
   topMoves = [];
+  moveHistory = [];
   postState();
 };
 
@@ -226,17 +230,17 @@ const stepTraining = async () => {
     selectedMove = mcts.move as Move | null;
   }
 
-  const applyMove = (move: Move): boolean => {
+  const applyMove = (move: Move): Move | null => {
     try {
       const applied = game.move({
         from: move.from,
         to: move.to,
         promotion: move.promotion
       });
-      return Boolean(applied);
+      return applied ?? null;
     } catch (err) {
       console.error('Invalid move attempted:', move, err);
-      return false;
+      return null;
     }
   };
 
@@ -247,10 +251,14 @@ const stepTraining = async () => {
       const fallbackMoves = game.moves({ verbose: true }) as Move[];
       if (fallbackMoves.length > 0) {
         const fallback = fallbackMoves[Math.floor(Math.random() * fallbackMoves.length)];
-        if (applyMove(fallback)) {
+        const fallbackApplied = applyMove(fallback);
+        if (fallbackApplied) {
           console.warn('Applied fallback random move:', fallback);
+          moveHistory = [...moveHistory, fallbackApplied.san];
         }
       }
+    } else {
+      moveHistory = [...moveHistory, applied.san];
     }
   }
 
@@ -327,6 +335,7 @@ const stepTraining = async () => {
 
     setTimeout(() => {
       game.reset();
+      moveHistory = [];
       postState();
     }, 1000);
   }
