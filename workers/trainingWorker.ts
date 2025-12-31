@@ -28,7 +28,9 @@ import type {
   MctsConfig,
   TrainingSample,
   MoveLike,
-  PerformanceStats
+  PerformanceStats,
+  Color,
+  ForfeitInfo
 } from '../types';
 
 const INITIAL_METRICS: TrainingMetrics = {
@@ -104,6 +106,7 @@ type StatePayload = {
   metricsHistory: TrainingMetrics[];
   isMctsThinking: boolean;
   perfStats: PerformanceStats;
+  forfeit: ForfeitInfo | null;
 };
 
 const ctx: DedicatedWorkerGlobalScope = self as unknown as DedicatedWorkerGlobalScope;
@@ -128,6 +131,7 @@ let heatmap: HeatmapSquare[] = [];
 let topMoves: MoveProbability[] = [];
 let moveHistory: string[] = [];
 let movesPlayed = 0;
+let forfeitInfo: ForfeitInfo | null = null;
 let perfStats: PerformanceStats = {
   lastMctsMs: 0,
   avgMctsMs: 0,
@@ -156,6 +160,42 @@ const postStatus = () => {
   ctx.postMessage(payload);
 };
 
+const getAiColors = (): Color[] => (isTraining ? ['w', 'b'] : ['b']);
+
+const getOpponent = (color: Color): Color => (color === 'w' ? 'b' : 'w');
+
+const hasOnlyKing = (gameState: Chess, color: Color): boolean => {
+  let count = 0;
+  for (const row of gameState.board()) {
+    for (const piece of row) {
+      if (!piece || piece.color !== color) continue;
+      count += 1;
+      if (count > 1) return false;
+      if (piece.type !== 'k') return false;
+    }
+  }
+  return count === 1;
+};
+
+const getForfeitInfo = (gameState: Chess, aiColors: Color[]): ForfeitInfo | null => {
+  const turn = gameState.turn();
+  if (aiColors.includes(turn)) {
+    if (gameState.moves().length === 0) {
+      return { winner: getOpponent(turn), reason: 'no-legal-moves' };
+    }
+    if (hasOnlyKing(gameState, turn)) {
+      return { winner: getOpponent(turn), reason: 'lone-king' };
+    }
+  }
+  for (const color of aiColors) {
+    if (color === turn) continue;
+    if (hasOnlyKing(gameState, color)) {
+      return { winner: getOpponent(color), reason: 'lone-king' };
+    }
+  }
+  return null;
+};
+
 const postState = () => {
   const payload: StatePayload = {
     type: 'state',
@@ -166,7 +206,8 @@ const postState = () => {
     currentMetrics,
     metricsHistory,
     isMctsThinking,
-    perfStats
+    perfStats,
+    forfeit: forfeitInfo
   };
   ctx.postMessage(payload);
 };
@@ -352,12 +393,99 @@ const resetGameState = () => {
   topMoves = [];
   moveHistory = [];
   movesPlayed = 0;
+  forfeitInfo = null;
   postState();
+};
+
+const finalizeTrainingGame = async (outcomeForWhite: number) => {
+  const gameCount = currentMetrics.gamesPlayed + 1;
+
+  const finalizedSamples = currentGameSamples.map((sample) => {
+    const outcomeForPlayer = sample.player === 'w' ? outcomeForWhite : -outcomeForWhite;
+    const bootstrapValue = sample.bootstrapValue ?? 0;
+    const blendedValue =
+      VALUE_TARGET_OUTCOME_WEIGHT * outcomeForPlayer +
+      (1 - VALUE_TARGET_OUTCOME_WEIGHT) * bootstrapValue;
+    return {
+      ...sample,
+      value: blendedValue
+    };
+  });
+  replayBuffer.push(...finalizedSamples);
+  currentGameSamples = [];
+
+  if (replayBuffer.length > MAX_REPLAY_BUFFER) {
+    replayBuffer.splice(0, replayBuffer.length - MAX_REPLAY_BUFFER);
+  }
+
+  let policyLoss = currentMetrics.policyLoss;
+  let valueLoss = currentMetrics.valueLoss;
+
+  if (replayBuffer.length >= MIN_REPLAY_START) {
+    const effectiveBatchSize = Math.min(BATCH_SIZE, replayBuffer.length);
+    const batch = sampleReplayBatch(replayBuffer, effectiveBatchSize);
+
+    const inputTensors = batch.map((sample) => boardToTensor(new Chess(sample.fen)));
+    const stateTensor = tf.concat(inputTensors, 0);
+    inputTensors.forEach((t) => t.dispose());
+    const policyTensor = tf.tensor2d(batch.map((s) => s.policy), [batch.length, POLICY_OUTPUT_SIZE]);
+    const valueTargets = batch.map((s) => s.value);
+    const valueTensor = tf.tensor2d(valueTargets, [batch.length, 1]);
+
+    const history = await model.fit(stateTensor, [policyTensor, valueTensor], {
+      batchSize: Math.min(BATCH_SIZE, batch.length),
+      epochs: 1,
+      verbose: 0
+    });
+
+    stateTensor.dispose();
+    policyTensor.dispose();
+    valueTensor.dispose();
+
+    const policyHistory = history.history['policy_head_loss'] ?? history.history['loss'];
+    const valueHistory = history.history['value_head_loss'];
+    if (policyHistory && policyHistory.length > 0) policyLoss = Number(policyHistory[0]);
+    if (valueHistory && valueHistory.length > 0) valueLoss = Number(valueHistory[0]);
+  }
+
+  const newWinRate =
+    (currentMetrics.winRate * currentMetrics.gamesPlayed + (outcomeForWhite === 1 ? 1 : 0)) / gameCount;
+
+  const newMetrics: TrainingMetrics = {
+    epoch: currentMetrics.epoch + 1,
+    gamesPlayed: gameCount,
+    policyLoss,
+    valueLoss,
+    winRate: newWinRate,
+    entropy: currentMetrics.entropy
+  };
+
+  currentMetrics = newMetrics;
+  metricsHistory = [...metricsHistory, newMetrics].slice(-50);
+
+  postState();
+
+  setTimeout(() => {
+    game.reset();
+    moveHistory = [];
+    movesPlayed = 0;
+    forfeitInfo = null;
+    postState();
+  }, 1000);
 };
 
 const stepTraining = async () => {
   if (!model) return;
+  if (forfeitInfo) return;
   if (game.isGameOver() || movesPlayed >= MAX_GAME_MOVES) return;
+  const aiColors = getAiColors();
+  const forfeitStart = getForfeitInfo(game, aiColors);
+  if (forfeitStart) {
+    forfeitInfo = forfeitStart;
+    postState();
+    await finalizeTrainingGame(forfeitStart.winner === 'w' ? 1 : -1);
+    return;
+  }
   const stepStart = performance.now();
 
   try {
@@ -435,8 +563,15 @@ const stepTraining = async () => {
 
     postState();
 
+    const forfeitAfterMove = getForfeitInfo(game, aiColors);
+    if (forfeitAfterMove) {
+      forfeitInfo = forfeitAfterMove;
+      postState();
+      await finalizeTrainingGame(forfeitAfterMove.winner === 'w' ? 1 : -1);
+      return;
+    }
+
     if (movesPlayed >= MAX_GAME_MOVES || game.isGameOver()) {
-      const gameCount = currentMetrics.gamesPlayed + 1;
       let outcomeForWhite = 0;
       if (movesPlayed >= MAX_GAME_MOVES) {
         outcomeForWhite = computeMaterialOutcome(game);
@@ -445,78 +580,7 @@ const stepTraining = async () => {
       } else if (game.isDraw()) {
         outcomeForWhite = 0;
       }
-
-      const finalizedSamples = currentGameSamples.map((sample) => {
-        const outcomeForPlayer = sample.player === 'w' ? outcomeForWhite : -outcomeForWhite;
-        const bootstrapValue = sample.bootstrapValue ?? 0;
-        const blendedValue =
-          VALUE_TARGET_OUTCOME_WEIGHT * outcomeForPlayer +
-          (1 - VALUE_TARGET_OUTCOME_WEIGHT) * bootstrapValue;
-        return {
-          ...sample,
-          value: blendedValue
-        };
-      });
-      replayBuffer.push(...finalizedSamples);
-      currentGameSamples = [];
-
-      if (replayBuffer.length > MAX_REPLAY_BUFFER) {
-        replayBuffer.splice(0, replayBuffer.length - MAX_REPLAY_BUFFER);
-      }
-
-      let policyLoss = currentMetrics.policyLoss;
-      let valueLoss = currentMetrics.valueLoss;
-
-      if (replayBuffer.length >= MIN_REPLAY_START) {
-        const effectiveBatchSize = Math.min(BATCH_SIZE, replayBuffer.length);
-        const batch = sampleReplayBatch(replayBuffer, effectiveBatchSize);
-
-        const inputTensors = batch.map((sample) => boardToTensor(new Chess(sample.fen)));
-        const stateTensor = tf.concat(inputTensors, 0);
-        inputTensors.forEach((t) => t.dispose());
-        const policyTensor = tf.tensor2d(batch.map((s) => s.policy), [batch.length, POLICY_OUTPUT_SIZE]);
-        const valueTargets = batch.map((s) => s.value);
-        const valueTensor = tf.tensor2d(valueTargets, [batch.length, 1]);
-
-        const history = await model.fit(stateTensor, [policyTensor, valueTensor], {
-          batchSize: Math.min(BATCH_SIZE, batch.length),
-          epochs: 1,
-          verbose: 0
-        });
-
-        stateTensor.dispose();
-        policyTensor.dispose();
-        valueTensor.dispose();
-
-        const policyHistory = history.history['policy_head_loss'] ?? history.history['loss'];
-        const valueHistory = history.history['value_head_loss'];
-        if (policyHistory && policyHistory.length > 0) policyLoss = Number(policyHistory[0]);
-        if (valueHistory && valueHistory.length > 0) valueLoss = Number(valueHistory[0]);
-      }
-
-      const newWinRate =
-        (currentMetrics.winRate * currentMetrics.gamesPlayed + (outcomeForWhite === 1 ? 1 : 0)) / gameCount;
-
-      const newMetrics: TrainingMetrics = {
-        epoch: currentMetrics.epoch + 1,
-        gamesPlayed: gameCount,
-        policyLoss,
-        valueLoss,
-        winRate: newWinRate,
-        entropy: currentMetrics.entropy
-      };
-
-      currentMetrics = newMetrics;
-      metricsHistory = [...metricsHistory, newMetrics].slice(-50);
-
-      postState();
-
-      setTimeout(() => {
-        game.reset();
-        moveHistory = [];
-        movesPlayed = 0;
-        postState();
-      }, 1000);
+      await finalizeTrainingGame(outcomeForWhite);
     }
   } finally {
     const elapsed = performance.now() - stepStart;
@@ -540,6 +604,14 @@ const handlePlayerMove = async (move: MoveLike) => {
   moveHistory = [...moveHistory, applied.san];
   movesPlayed += 1;
   postState();
+
+  const aiColors = getAiColors();
+  const forfeitAfterPlayer = getForfeitInfo(game, aiColors);
+  if (forfeitAfterPlayer) {
+    forfeitInfo = forfeitAfterPlayer;
+    postState();
+    return;
+  }
 
   if (game.isGameOver() || game.turn() !== 'b') return;
 
@@ -649,6 +721,7 @@ ctx.onmessage = (event: MessageEvent<WorkerMessage>) => {
       currentGameSamples = [];
       metricsHistory = [];
       currentMetrics = { ...INITIAL_METRICS };
+      forfeitInfo = null;
       perfStats = {
         lastMctsMs: 0,
         avgMctsMs: 0,

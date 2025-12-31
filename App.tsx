@@ -5,7 +5,7 @@ import { Activity, Brain, Cpu, Play, StopCircle, RefreshCw, Circle, Flag } from 
 import { HeatmapBoard } from './components/HeatmapBoard';
 import { MctsVisualization } from './components/MctsVisualization';
 import { MoveAnalysis } from './components/MoveAnalysis';
-import { TrainingMetrics, MoveProbability, HeatmapSquare, MctsDifficulty, PerformanceStats } from './types';
+import { TrainingMetrics, MoveProbability, HeatmapSquare, MctsDifficulty, PerformanceStats, ForfeitInfo } from './types';
 
 const INITIAL_METRICS: TrainingMetrics = {
   epoch: 0,
@@ -35,6 +35,7 @@ type WorkerStateMessage = {
   currentMetrics: TrainingMetrics;
   isMctsThinking: boolean;
   perfStats: PerformanceStats;
+  forfeit: ForfeitInfo | null;
 };
 
 type WorkerMessage = WorkerStatusMessage | WorkerStateMessage;
@@ -80,29 +81,8 @@ const App: React.FC = () => {
 
     worker.onmessage = (event: MessageEvent<WorkerMessage>) => {
       const message = event.data;
-      if (message.type === 'status') {
-        setModelStatus(message.status);
-        setModelError(message.status === 'error' ? message.error ?? 'Unknown error' : null);
-        if (message.backend) setBackend(message.backend);
-        if (message.phase) setModelPhase(message.phase);
-        return;
-      }
-      if (pausedRef.current) {
-        pendingStateRef.current = message;
-        return;
-      }
-      const nextGame = new Chess(message.fen);
-      setGame(nextGame);
-      setHeatmap(message.heatmap);
-      setTopMoves(message.topMoves);
-      setMoveHistory(message.moveHistory);
-      setCurrentMetrics(message.currentMetrics);
-      setIsMctsThinking(message.isMctsThinking);
-      setPerfStats(message.perfStats);
-
-      if (nextGame.isCheckmate()) {
-        const winner = nextGame.turn() === 'w' ? 'BLACK' : 'WHITE';
-        setWinBanner(`${winner} WINS`);
+      const triggerWinPause = (winnerLabel: 'WHITE' | 'BLACK') => {
+        setWinBanner(`${winnerLabel} WINS`);
         setIsPaused(true);
         pausedRef.current = true;
         if (pauseTimeoutRef.current) {
@@ -125,6 +105,34 @@ const App: React.FC = () => {
             setPerfStats(pending.perfStats);
           }
         }, 3000);
+      };
+      if (message.type === 'status') {
+        setModelStatus(message.status);
+        setModelError(message.status === 'error' ? message.error ?? 'Unknown error' : null);
+        if (message.backend) setBackend(message.backend);
+        if (message.phase) setModelPhase(message.phase);
+        return;
+      }
+      if (pausedRef.current) {
+        pendingStateRef.current = message;
+        return;
+      }
+      const nextGame = new Chess(message.fen);
+      setGame(nextGame);
+      setHeatmap(message.heatmap);
+      setTopMoves(message.topMoves);
+      setMoveHistory(message.moveHistory);
+      setCurrentMetrics(message.currentMetrics);
+      setIsMctsThinking(message.isMctsThinking);
+      setPerfStats(message.perfStats);
+
+      if (message.forfeit) {
+        triggerWinPause(message.forfeit.winner === 'w' ? 'WHITE' : 'BLACK');
+        return;
+      }
+      if (nextGame.isCheckmate()) {
+        const winner = nextGame.turn() === 'w' ? 'BLACK' : 'WHITE';
+        triggerWinPause(winner);
       }
     };
 

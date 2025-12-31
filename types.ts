@@ -42,6 +42,11 @@ export interface HeatmapSquare {
 
 export type PieceSymbol = 'p' | 'n' | 'b' | 'r' | 'q' | 'k';
 export type Color = 'w' | 'b';
+export type ForfeitReason = 'no-legal-moves' | 'lone-king';
+export interface ForfeitInfo {
+  winner: Color;
+  reason: ForfeitReason;
+}
 
 export type MctsDifficulty = 'easy' | 'medium' | 'hard';
 
