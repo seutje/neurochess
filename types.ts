@@ -12,6 +12,9 @@ export interface TrainingMetrics {
   policyLoss: number;
   valueLoss: number;
   winRate: number; // vs Random/MCTS
+  wins: number;
+  losses: number;
+  draws: number;
   entropy: number;
 }
 

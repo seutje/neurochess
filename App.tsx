@@ -13,6 +13,9 @@ const INITIAL_METRICS: TrainingMetrics = {
   policyLoss: 2.5,
   valueLoss: 1.0,
   winRate: 0,
+  wins: 0,
+  losses: 0,
+  draws: 0,
   entropy: 4.5
 };
 
@@ -438,9 +441,9 @@ const App: React.FC = () => {
                     <div className="text-2xl font-bold font-mono">{currentMetrics.gamesPlayed}</div>
                 </div>
                 <div className="bg-neuro-800 p-3 border border-neuro-700">
-                    <div className="text-xs text-neuro-400 font-mono mb-1">WIN RATE (vs heuristic)</div>
+                    <div className="text-xs text-neuro-400 font-mono mb-1">W / L / D (vs heuristic)</div>
                     <div className="text-2xl font-bold font-mono text-neuro-success">
-                        {(currentMetrics.winRate * 100).toFixed(1)}%
+                        {currentMetrics.wins}/{currentMetrics.losses}/{currentMetrics.draws}
                     </div>
                 </div>
             </div>

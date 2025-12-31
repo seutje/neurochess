@@ -39,6 +39,9 @@ const INITIAL_METRICS: TrainingMetrics = {
   policyLoss: 2.5,
   valueLoss: 1.0,
   winRate: 0,
+  wins: 0,
+  losses: 0,
+  draws: 0,
   entropy: 4.5
 };
 
@@ -448,8 +451,10 @@ const finalizeTrainingGame = async (outcomeForWhite: number) => {
     if (valueHistory && valueHistory.length > 0) valueLoss = Number(valueHistory[0]);
   }
 
-  const newWinRate =
-    (currentMetrics.winRate * currentMetrics.gamesPlayed + (outcomeForWhite === 1 ? 1 : 0)) / gameCount;
+  const didWin = outcomeForWhite === 1;
+  const didLose = outcomeForWhite === -1;
+  const didDraw = outcomeForWhite === 0;
+  const newWinRate = (currentMetrics.winRate * currentMetrics.gamesPlayed + (didWin ? 1 : 0)) / gameCount;
 
   const newMetrics: TrainingMetrics = {
     epoch: currentMetrics.epoch + 1,
@@ -457,6 +462,9 @@ const finalizeTrainingGame = async (outcomeForWhite: number) => {
     policyLoss,
     valueLoss,
     winRate: newWinRate,
+    wins: currentMetrics.wins + (didWin ? 1 : 0),
+    losses: currentMetrics.losses + (didLose ? 1 : 0),
+    draws: currentMetrics.draws + (didDraw ? 1 : 0),
     entropy: currentMetrics.entropy
   };
 
