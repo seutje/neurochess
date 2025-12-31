@@ -30,8 +30,9 @@ const residualBlock = (input: tf.SymbolicTensor): tf.SymbolicTensor => {
 
 export const compileTinyZeroModel = (model: tf.LayersModel): tf.LayersModel => {
   model.compile({
-    optimizer: tf.train.sgd(LEARNING_RATE),
-    loss: ['categoricalCrossentropy', 'meanSquaredError']
+    optimizer: tf.train.adam(LEARNING_RATE),
+    loss: ['categoricalCrossentropy', 'meanSquaredError'],
+    lossWeights: [1.0, 0.5]
   });
   return model;
 };

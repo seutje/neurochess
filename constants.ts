@@ -7,13 +7,13 @@ export const RESIDUAL_BLOCKS = 4;
 export const POLICY_OUTPUT_SIZE = 64 * 64 * 5; // From-To with promotion channels
 
 // Training Hyperparameters
-export const LEARNING_RATE = 0.01;
-export const BATCH_SIZE = 512;
+export const LEARNING_RATE = 0.001;
+export const BATCH_SIZE = 256;
 export const MCTS_ROLLOUT_DEPTH = 10;
 export const TRAINING_MCTS_SIMULATIONS = 600;
 export const TRAINING_DIRICHLET_ALPHA = 0.3;
 export const TRAINING_DIRICHLET_EPSILON = 0.25;
-export const MAX_REPLAY_BUFFER = 512;
+export const MAX_REPLAY_BUFFER = 4096;
 
 // Chart Colors
 export const COLORS = {
