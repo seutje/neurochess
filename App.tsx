@@ -22,6 +22,7 @@ type WorkerStatusMessage = {
   type: 'status';
   status: WorkerStatus;
   error?: string;
+  backend?: string;
 };
 
 type WorkerStateMessage = {
@@ -43,6 +44,7 @@ const App: React.FC = () => {
   const [isTraining, setIsTraining] = useState(false);
   const [modelStatus, setModelStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [modelError, setModelError] = useState<string | null>(null);
+  const [backend, setBackend] = useState<string>('unknown');
   const [difficulty, setDifficulty] = useState<MctsDifficulty>('easy');
   const [isMctsThinking, setIsMctsThinking] = useState(false);
   
@@ -64,6 +66,7 @@ const App: React.FC = () => {
       if (message.type === 'status') {
         setModelStatus(message.status);
         setModelError(message.status === 'error' ? message.error ?? 'Unknown error' : null);
+        if (message.backend) setBackend(message.backend);
         return;
       }
       setGame(new Chess(message.fen));
@@ -85,6 +88,21 @@ const App: React.FC = () => {
     };
   }, []);
 
+  const isGpuBackend = backend === 'webgl' || backend === 'webgpu';
+  const deviceLabel = (() => {
+    switch (backend) {
+      case 'webgl':
+        return 'GPU (WEBGL)';
+      case 'webgpu':
+        return 'GPU (WEBGPU)';
+      case 'wasm':
+        return 'CPU (WASM)';
+      case 'cpu':
+        return 'CPU';
+      default:
+        return backend.toUpperCase();
+    }
+  })();
 
   // UI Handlers
   const handleStartTraining = () => {
@@ -128,8 +146,12 @@ const App: React.FC = () => {
         <div className="flex items-center space-x-4">
              <div className="hidden md:flex flex-col items-end mr-4">
                 <span className="text-xs text-gray-500 font-mono">DEVICE</span>
-                <span className="text-xs font-bold text-neuro-success flex items-center gap-1">
-                     <Cpu size={12} /> GPU (WEBGL)
+                <span
+                  className={`text-xs font-bold flex items-center gap-1 ${
+                    isGpuBackend ? 'text-neuro-success' : 'text-gray-300'
+                  }`}
+                >
+                     <Cpu size={12} /> {deviceLabel}
                 </span>
              </div>
              <div className="flex flex-col items-end">

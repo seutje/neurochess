@@ -44,8 +44,10 @@ const evaluatePosition = async (game: Chess, model: tf.LayersModel): Promise<Mct
     const prediction = model.predict(tensor) as tf.Tensor[];
     return [prediction[0], prediction[1]];
   });
-  const policy = await (policyTensor as tf.Tensor).data();
-  const value = await (valueTensor as tf.Tensor).data();
+  const [policy, value] = await Promise.all([
+    (policyTensor as tf.Tensor).data(),
+    (valueTensor as tf.Tensor).data()
+  ]);
   tensor.dispose();
   (policyTensor as tf.Tensor).dispose();
   (valueTensor as tf.Tensor).dispose();

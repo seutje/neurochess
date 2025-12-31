@@ -17,7 +17,8 @@ import {
   MIN_REPLAY_START,
   POLICY_LABEL_SMOOTHING,
   VALUE_TARGET_OUTCOME_WEIGHT,
-  MAX_GAME_MOVES
+  MAX_GAME_MOVES,
+  INPUT_PLANES
 } from '../constants';
 import type {
   TrainingMetrics,
@@ -81,6 +82,7 @@ type StatusPayload = {
   type: 'status';
   status: WorkerStatus;
   error?: string;
+  backend?: string;
 };
 
 type StatePayload = {
@@ -99,6 +101,7 @@ const ctx: DedicatedWorkerGlobalScope = self as unknown as DedicatedWorkerGlobal
 let model: tf.LayersModel | null = null;
 let modelStatus: WorkerStatus = 'loading';
 let modelError: string | undefined;
+let backend: string | undefined;
 
 let difficulty: MctsDifficulty = 'easy';
 let isTraining = false;
@@ -119,7 +122,8 @@ const postStatus = () => {
   const payload: StatusPayload = {
     type: 'status',
     status: modelStatus,
-    error: modelError
+    error: modelError,
+    backend
   };
   ctx.postMessage(payload);
 };
@@ -204,6 +208,24 @@ const computeMaterialOutcome = (gameState: Chess): number => {
   }
   if (whiteScore === blackScore) return 0;
   return whiteScore > blackScore ? 1 : -1;
+};
+
+const initBackend = async () => {
+  tf.enableProdMode();
+  const hasOffscreenCanvas = typeof OffscreenCanvas !== 'undefined';
+  const preferredBackends = hasOffscreenCanvas ? ['webgl', 'cpu'] : ['cpu'];
+  for (const candidate of preferredBackends) {
+    if (tf.getBackend() === candidate) break;
+    try {
+      const ok = await tf.setBackend(candidate);
+      if (ok) break;
+    } catch (err) {
+      console.warn(`Failed to initialize backend ${candidate}.`, err);
+    }
+  }
+  await tf.ready();
+  backend = tf.getBackend();
+  postStatus();
 };
 
 const serializeMove = (move: Move): MoveLike => ({
@@ -457,7 +479,7 @@ const initModel = async (baseModelUrl: string) => {
   postStatus();
 
   try {
-    await tf.ready();
+    await initBackend();
     let newModel: tf.LayersModel;
     try {
       const loaded = await tf.loadLayersModel(baseModelUrl);
@@ -468,6 +490,15 @@ const initModel = async (baseModelUrl: string) => {
       console.warn('Base model not found; using fresh weights.', loadErr);
     }
     model = newModel;
+    const warmupOutputs = tf.tidy(() => {
+      const warmupInput = tf.zeros([1, 8, 8, INPUT_PLANES]);
+      return newModel.predict(warmupInput) as tf.Tensor[];
+    });
+    if (Array.isArray(warmupOutputs)) {
+      warmupOutputs.forEach((tensor) => tensor.dispose());
+    } else {
+      warmupOutputs.dispose();
+    }
     modelStatus = 'ready';
     postStatus();
     postState();
