@@ -3,7 +3,7 @@ import { Chess } from 'chess.js';
 import { Activity, Brain, Cpu, Play, StopCircle, RefreshCw, Circle } from 'lucide-react';
 
 import { HeatmapBoard } from './components/HeatmapBoard';
-import { LossChart, EntropyChart } from './components/Charts';
+import { MctsVisualization } from './components/MctsVisualization';
 import { MoveAnalysis } from './components/MoveAnalysis';
 import { TrainingMetrics, MoveProbability, HeatmapSquare, MctsDifficulty, PerformanceStats } from './types';
 
@@ -32,7 +32,6 @@ type WorkerStateMessage = {
   topMoves: MoveProbability[];
   moveHistory: string[];
   currentMetrics: TrainingMetrics;
-  metricsHistory: TrainingMetrics[];
   isMctsThinking: boolean;
   perfStats: PerformanceStats;
 };
@@ -50,7 +49,6 @@ const App: React.FC = () => {
   const [isMctsThinking, setIsMctsThinking] = useState(false);
   
   // Metrics & Visuals
-  const [metricsHistory, setMetricsHistory] = useState<TrainingMetrics[]>([]);
   const [currentMetrics, setCurrentMetrics] = useState<TrainingMetrics>(INITIAL_METRICS);
   const [heatmap, setHeatmap] = useState<HeatmapSquare[]>([]);
   const [topMoves, setTopMoves] = useState<MoveProbability[]>([]);
@@ -86,7 +84,6 @@ const App: React.FC = () => {
       setTopMoves(message.topMoves);
       setMoveHistory(message.moveHistory);
       setCurrentMetrics(message.currentMetrics);
-      setMetricsHistory(message.metricsHistory);
       setIsMctsThinking(message.isMctsThinking);
       setPerfStats(message.perfStats);
     };
@@ -132,7 +129,6 @@ const App: React.FC = () => {
       setIsTraining(false);
       setIsMctsThinking(false);
       setGame(new Chess());
-      setMetricsHistory([]);
       setCurrentMetrics(INITIAL_METRICS);
       setHeatmap([]);
       setTopMoves([]);
@@ -299,9 +295,8 @@ const App: React.FC = () => {
                 </div>
             </div>
 
-            {/* Charts */}
-            <LossChart data={metricsHistory} />
-            <EntropyChart data={metricsHistory} />
+            {/* MCTS Visualization */}
+            <MctsVisualization moves={topMoves} />
             <div className="bg-neuro-800 p-3 border border-neuro-600 flex flex-col min-h-[160px] max-h-56">
                 <h3 className="text-xs font-mono text-gray-400 mb-2 uppercase tracking-wider">Moves Log</h3>
                 <div className="flex-1 overflow-y-auto pr-1 space-y-1">

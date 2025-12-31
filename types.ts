@@ -32,6 +32,7 @@ export interface MoveProbability {
   probability: number;
   isBest: boolean;
   move: MoveLike;
+  visitCount?: number;
 }
 
 export interface HeatmapSquare {

@@ -323,7 +323,8 @@ const stepTraining = async () => {
           san: entry.move.san ?? '',
           probability: entry.probability,
           isBest: false,
-          move: serializeMove(entry.move as Move)
+          move: serializeMove(entry.move as Move),
+          visitCount: entry.visitCount
         }))
         .sort((a, b) => b.probability - a.probability);
 
