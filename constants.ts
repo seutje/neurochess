@@ -17,7 +17,7 @@ export const MAX_REPLAY_BUFFER = 4096;
 export const MIN_REPLAY_START = 512;
 export const POLICY_LABEL_SMOOTHING = 0.1;
 export const VALUE_TARGET_OUTCOME_WEIGHT = 0.7;
-export const MAX_GAME_MOVES = 100;
+export const MAX_GAME_MOVES = 200;
 
 // Chart Colors
 export const COLORS = {

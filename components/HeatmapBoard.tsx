@@ -8,11 +8,22 @@ interface Props {
   heatmap: HeatmapSquare[];
   onPieceDrop?: (source: string, target: string, piece: string) => boolean;
   isBot?: boolean;
+  isPaused?: boolean;
   statusText?: string;
   alertText?: string;
+  overlayText?: string;
 }
 
-export const HeatmapBoard: React.FC<Props> = ({ game, heatmap, onPieceDrop, isBot, statusText, alertText }) => {
+export const HeatmapBoard: React.FC<Props> = ({
+  game,
+  heatmap,
+  onPieceDrop,
+  isBot,
+  isPaused,
+  statusText,
+  alertText,
+  overlayText
+}) => {
   const fen = game.fen();
   const piecePlacement = fen.split(' ')[0];
   const position = React.useMemo(() => fenStringToPositionObject(piecePlacement, 8, 8), [piecePlacement]);
@@ -71,9 +82,16 @@ export const HeatmapBoard: React.FC<Props> = ({ game, heatmap, onPieceDrop, isBo
               squareStyles: customSquareStyles,
               darkSquareStyle: { backgroundColor: '#1d1d1d' },
               lightSquareStyle: { backgroundColor: '#2a2a2a' },
-              allowDragging: !isBot
+              allowDragging: !isBot && !isPaused
             }}
         />
+        {overlayText ? (
+          <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+            <div className="w-full text-center text-3xl sm:text-4xl lg:text-5xl font-black tracking-widest text-white bg-neuro-900/80 border-y border-neuro-accent py-3 drop-shadow-[0_6px_10px_rgba(0,0,0,0.8)]">
+              {overlayText}
+            </div>
+          </div>
+        ) : null}
         {statusText ? (
           <div className="absolute top-2 left-2 bg-neuro-900/70 text-neuro-200 text-xs font-mono px-2 py-1 border border-neuro-700">
             {statusText}

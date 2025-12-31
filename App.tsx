@@ -47,6 +47,8 @@ const App: React.FC = () => {
   const [backend, setBackend] = useState<string>('unknown');
   const [difficulty, setDifficulty] = useState<MctsDifficulty>('easy');
   const [isMctsThinking, setIsMctsThinking] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [winBanner, setWinBanner] = useState<string | null>(null);
   
   // Metrics & Visuals
   const [currentMetrics, setCurrentMetrics] = useState<TrainingMetrics>(INITIAL_METRICS);
@@ -66,6 +68,9 @@ const App: React.FC = () => {
   });
   
   const workerRef = useRef<Worker | null>(null);
+  const pauseTimeoutRef = useRef<number | null>(null);
+  const pendingStateRef = useRef<WorkerStateMessage | null>(null);
+  const pausedRef = useRef(false);
 
   useEffect(() => {
     const worker = new Worker(new URL('./workers/trainingWorker.ts', import.meta.url), { type: 'module' });
@@ -79,13 +84,45 @@ const App: React.FC = () => {
         if (message.backend) setBackend(message.backend);
         return;
       }
-      setGame(new Chess(message.fen));
+      if (pausedRef.current) {
+        pendingStateRef.current = message;
+        return;
+      }
+      const nextGame = new Chess(message.fen);
+      setGame(nextGame);
       setHeatmap(message.heatmap);
       setTopMoves(message.topMoves);
       setMoveHistory(message.moveHistory);
       setCurrentMetrics(message.currentMetrics);
       setIsMctsThinking(message.isMctsThinking);
       setPerfStats(message.perfStats);
+
+      if (nextGame.isCheckmate()) {
+        const winner = nextGame.turn() === 'w' ? 'BLACK' : 'WHITE';
+        setWinBanner(`${winner} WINS`);
+        setIsPaused(true);
+        pausedRef.current = true;
+        if (pauseTimeoutRef.current) {
+          window.clearTimeout(pauseTimeoutRef.current);
+        }
+        pauseTimeoutRef.current = window.setTimeout(() => {
+          setIsPaused(false);
+          setWinBanner(null);
+          pausedRef.current = false;
+          const pending = pendingStateRef.current;
+          pendingStateRef.current = null;
+          if (pending) {
+            const resumedGame = new Chess(pending.fen);
+            setGame(resumedGame);
+            setHeatmap(pending.heatmap);
+            setTopMoves(pending.topMoves);
+            setMoveHistory(pending.moveHistory);
+            setCurrentMetrics(pending.currentMetrics);
+            setIsMctsThinking(pending.isMctsThinking);
+            setPerfStats(pending.perfStats);
+          }
+        }, 3000);
+      }
     };
 
     const baseRoot = new URL(import.meta.env.BASE_URL ?? '/', window.location.origin);
@@ -95,6 +132,14 @@ const App: React.FC = () => {
     return () => {
       worker.terminate();
       workerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (pauseTimeoutRef.current) {
+        window.clearTimeout(pauseTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -130,6 +175,14 @@ const App: React.FC = () => {
   const handleReset = () => {
       setIsTraining(false);
       setIsMctsThinking(false);
+      setIsPaused(false);
+      setWinBanner(null);
+      pausedRef.current = false;
+      pendingStateRef.current = null;
+      if (pauseTimeoutRef.current) {
+        window.clearTimeout(pauseTimeoutRef.current);
+        pauseTimeoutRef.current = null;
+      }
       setGame(new Chess());
       setCurrentMetrics(INITIAL_METRICS);
       setHeatmap([]);
@@ -205,7 +258,9 @@ const App: React.FC = () => {
                     game={game} 
                     heatmap={heatmap} 
                     isBot={isTraining}
+                    isPaused={isPaused}
                     alertText={checkStatusText ?? undefined}
+                    overlayText={winBanner ?? undefined}
                     statusText={
                       modelStatus === 'loading'
                         ? 'INITIALIZING MODEL...'
