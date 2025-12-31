@@ -170,5 +170,5 @@ export const runMcts = async (
     visitCount: stat.visitCount
   }));
 
-  return { move, policy };
+  return { move, policy, value: root.qValue };
 };

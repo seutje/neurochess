@@ -8,12 +8,16 @@ export const POLICY_OUTPUT_SIZE = 64 * 64 * 5; // From-To with promotion channel
 
 // Training Hyperparameters
 export const LEARNING_RATE = 0.001;
-export const BATCH_SIZE = 256;
+export const BATCH_SIZE = 512;
 export const MCTS_ROLLOUT_DEPTH = 10;
 export const TRAINING_MCTS_SIMULATIONS = 600;
 export const TRAINING_DIRICHLET_ALPHA = 0.3;
 export const TRAINING_DIRICHLET_EPSILON = 0.25;
 export const MAX_REPLAY_BUFFER = 4096;
+export const MIN_REPLAY_START = 512;
+export const POLICY_LABEL_SMOOTHING = 0.1;
+export const VALUE_TARGET_OUTCOME_WEIGHT = 0.7;
+export const MAX_GAME_MOVES = 200;
 
 // Chart Colors
 export const COLORS = {

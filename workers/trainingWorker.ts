@@ -13,7 +13,10 @@ import {
   TRAINING_DIRICHLET_ALPHA,
   TRAINING_DIRICHLET_EPSILON,
   MAX_REPLAY_BUFFER,
-  BATCH_SIZE
+  BATCH_SIZE,
+  MIN_REPLAY_START,
+  POLICY_LABEL_SMOOTHING,
+  VALUE_TARGET_OUTCOME_WEIGHT
 } from '../constants';
 import type {
   TrainingMetrics,
@@ -142,6 +145,38 @@ const sampleFromPolicy = (policy: number[]): number => {
   return policy.length - 1;
 };
 
+const buildPolicyTarget = (game: Chess, policy: { move: Move; probability: number }[]): number[] => {
+  const target = new Array(POLICY_OUTPUT_SIZE).fill(0);
+  policy.forEach((entry) => {
+    target[moveToIndex(entry.move)] = entry.probability;
+  });
+
+  if (POLICY_LABEL_SMOOTHING > 0) {
+    const legalMoves = game.moves({ verbose: true }) as Move[];
+    const legalCount = legalMoves.length;
+    if (legalCount > 0) {
+      const smooth = POLICY_LABEL_SMOOTHING / legalCount;
+      const scale = 1 - POLICY_LABEL_SMOOTHING;
+      for (const move of legalMoves) {
+        const index = moveToIndex(move);
+        target[index] = target[index] * scale + smooth;
+      }
+    }
+  }
+
+  return target;
+};
+
+const sampleReplayBatch = (buffer: TrainingSample[], batchSize: number): TrainingSample[] => {
+  if (buffer.length <= batchSize) return buffer.slice();
+  const indices = Array.from({ length: buffer.length }, (_, i) => i);
+  for (let i = indices.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [indices[i], indices[j]] = [indices[j], indices[i]];
+  }
+  return indices.slice(0, batchSize).map((index) => buffer[index]);
+};
+
 const computeEntropy = (policy: number[]): number => {
   return policy.reduce((acc, p) => (p > 0 ? acc - p * Math.log(p) : acc), 0);
 };
@@ -190,16 +225,14 @@ const stepTraining = async () => {
 
   if (turn === 'w') {
     const mcts = await runMctsWithIndicator(game, model, TRAINING_CONFIG, true);
-    const policyVector = new Array(POLICY_OUTPUT_SIZE).fill(0);
-    mcts.policy.forEach((entry) => {
-      policyVector[moveToIndex(entry.move as Move)] = entry.probability;
-    });
+    const policyVector = buildPolicyTarget(game, mcts.policy as { move: Move; probability: number }[]);
 
     currentGameSamples.push({
       fen: game.fen(),
       policy: policyVector,
       player: 'w',
-      value: 0
+      value: 0,
+      bootstrapValue: mcts.value
     });
 
     const movesWithProbs: MoveProbability[] = mcts.policy
@@ -227,6 +260,14 @@ const stepTraining = async () => {
     selectedMove = (mcts.policy[sampledIndex]?.move as Move) ?? (mcts.move as Move | null);
   } else {
     const mcts = await runMctsWithIndicator(game, model, MCTS_DIFFICULTY[difficulty]);
+    const policyVector = buildPolicyTarget(game, mcts.policy as { move: Move; probability: number }[]);
+    currentGameSamples.push({
+      fen: game.fen(),
+      policy: policyVector,
+      player: 'b',
+      value: 0,
+      bootstrapValue: mcts.value
+    });
     selectedMove = mcts.move as Move | null;
   }
 
@@ -266,15 +307,24 @@ const stepTraining = async () => {
 
   if (game.isGameOver()) {
     const gameCount = currentMetrics.gamesPlayed + 1;
-    let outcome = 0;
+    let outcomeForWhite = 0;
     if (game.isCheckmate()) {
-      outcome = game.turn() === 'w' ? -1 : 1;
+      outcomeForWhite = game.turn() === 'w' ? -1 : 1;
+    } else if (game.isDraw()) {
+      outcomeForWhite = 0;
     }
 
-    const finalizedSamples = currentGameSamples.map((sample) => ({
-      ...sample,
-      value: sample.player === 'w' ? outcome : -outcome
-    }));
+    const finalizedSamples = currentGameSamples.map((sample) => {
+      const outcomeForPlayer = sample.player === 'w' ? outcomeForWhite : -outcomeForWhite;
+      const bootstrapValue = sample.bootstrapValue ?? 0;
+      const blendedValue =
+        VALUE_TARGET_OUTCOME_WEIGHT * outcomeForPlayer +
+        (1 - VALUE_TARGET_OUTCOME_WEIGHT) * bootstrapValue;
+      return {
+        ...sample,
+        value: blendedValue
+      };
+    });
     replayBuffer.push(...finalizedSamples);
     currentGameSamples = [];
 
@@ -285,13 +335,9 @@ const stepTraining = async () => {
     let policyLoss = currentMetrics.policyLoss;
     let valueLoss = currentMetrics.valueLoss;
 
-    const effectiveBatchSize = Math.min(BATCH_SIZE, replayBuffer.length);
-    if (effectiveBatchSize > 0) {
-      const batch: TrainingSample[] = [];
-      for (let i = 0; i < effectiveBatchSize; i++) {
-        const sampleIndex = Math.floor(Math.random() * replayBuffer.length);
-        batch.push(replayBuffer[sampleIndex]);
-      }
+    if (replayBuffer.length >= MIN_REPLAY_START) {
+      const effectiveBatchSize = Math.min(BATCH_SIZE, replayBuffer.length);
+      const batch = sampleReplayBatch(replayBuffer, effectiveBatchSize);
 
       const inputTensors = batch.map((sample) => boardToTensor(new Chess(sample.fen)));
       const stateTensor = tf.concat(inputTensors, 0);
@@ -317,7 +363,7 @@ const stepTraining = async () => {
     }
 
     const newWinRate =
-      (currentMetrics.winRate * currentMetrics.gamesPlayed + (outcome === 1 ? 1 : 0)) / gameCount;
+      (currentMetrics.winRate * currentMetrics.gamesPlayed + (outcomeForWhite === 1 ? 1 : 0)) / gameCount;
 
     const newMetrics: TrainingMetrics = {
       epoch: currentMetrics.epoch + 1,

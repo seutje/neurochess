@@ -61,6 +61,7 @@ export interface MctsResult {
     probability: number;
     visitCount: number;
   }[];
+  value: number;
 }
 
 export interface TrainingSample {
@@ -68,4 +69,5 @@ export interface TrainingSample {
   policy: number[];
   player: 'w' | 'b';
   value: number;
+  bootstrapValue?: number;
 }
