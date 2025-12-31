@@ -16,7 +16,8 @@ import {
   BATCH_SIZE,
   MIN_REPLAY_START,
   POLICY_LABEL_SMOOTHING,
-  VALUE_TARGET_OUTCOME_WEIGHT
+  VALUE_TARGET_OUTCOME_WEIGHT,
+  MAX_GAME_MOVES
 } from '../constants';
 import type {
   TrainingMetrics,
@@ -112,6 +113,7 @@ let currentMetrics: TrainingMetrics = { ...INITIAL_METRICS };
 let heatmap: HeatmapSquare[] = [];
 let topMoves: MoveProbability[] = [];
 let moveHistory: string[] = [];
+let movesPlayed = 0;
 
 const postStatus = () => {
   const payload: StatusPayload = {
@@ -181,6 +183,29 @@ const computeEntropy = (policy: number[]): number => {
   return policy.reduce((acc, p) => (p > 0 ? acc - p * Math.log(p) : acc), 0);
 };
 
+const computeMaterialOutcome = (gameState: Chess): number => {
+  const pieceValues: Record<string, number> = {
+    p: 1,
+    n: 3,
+    b: 3,
+    r: 5,
+    q: 9,
+    k: 0
+  };
+  let whiteScore = 0;
+  let blackScore = 0;
+  for (const row of gameState.board()) {
+    for (const piece of row) {
+      if (!piece) continue;
+      const value = pieceValues[piece.type] ?? 0;
+      if (piece.color === 'w') whiteScore += value;
+      else blackScore += value;
+    }
+  }
+  if (whiteScore === blackScore) return 0;
+  return whiteScore > blackScore ? 1 : -1;
+};
+
 const serializeMove = (move: Move): MoveLike => ({
   from: move.from,
   to: move.to,
@@ -213,12 +238,13 @@ const resetGameState = () => {
   heatmap = [];
   topMoves = [];
   moveHistory = [];
+  movesPlayed = 0;
   postState();
 };
 
 const stepTraining = async () => {
   if (!model) return;
-  if (game.isGameOver()) return;
+  if (game.isGameOver() || movesPlayed >= MAX_GAME_MOVES) return;
 
   const turn = game.turn();
   let selectedMove: Move | null = null;
@@ -296,19 +322,23 @@ const stepTraining = async () => {
         if (fallbackApplied) {
           console.warn('Applied fallback random move:', fallback);
           moveHistory = [...moveHistory, fallbackApplied.san];
+          movesPlayed += 1;
         }
       }
     } else {
       moveHistory = [...moveHistory, applied.san];
+      movesPlayed += 1;
     }
   }
 
   postState();
 
-  if (game.isGameOver()) {
+  if (movesPlayed >= MAX_GAME_MOVES || game.isGameOver()) {
     const gameCount = currentMetrics.gamesPlayed + 1;
     let outcomeForWhite = 0;
-    if (game.isCheckmate()) {
+    if (movesPlayed >= MAX_GAME_MOVES) {
+      outcomeForWhite = computeMaterialOutcome(game);
+    } else if (game.isCheckmate()) {
       outcomeForWhite = game.turn() === 'w' ? -1 : 1;
     } else if (game.isDraw()) {
       outcomeForWhite = 0;
@@ -382,6 +412,7 @@ const stepTraining = async () => {
     setTimeout(() => {
       game.reset();
       moveHistory = [];
+      movesPlayed = 0;
       postState();
     }, 1000);
   }

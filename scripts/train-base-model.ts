@@ -153,6 +153,29 @@ const sampleReplayBatch = (buffer: TrainingSample[], batchSize: number): Trainin
   return indices.slice(0, batchSize).map((index) => buffer[index]);
 };
 
+const computeMaterialOutcome = (gameState: Chess): number => {
+  const pieceValues: Record<string, number> = {
+    p: 1,
+    n: 3,
+    b: 3,
+    r: 5,
+    q: 9,
+    k: 0
+  };
+  let whiteScore = 0;
+  let blackScore = 0;
+  for (const row of gameState.board()) {
+    for (const piece of row) {
+      if (!piece) continue;
+      const value = pieceValues[piece.type] ?? 0;
+      if (piece.color === 'w') whiteScore += value;
+      else blackScore += value;
+    }
+  }
+  if (whiteScore === blackScore) return 0;
+  return whiteScore > blackScore ? 1 : -1;
+};
+
 const evaluateValue = async (game: Chess, model: tf.LayersModel): Promise<number> => {
   const tensor = boardToTensor(game);
   const valueTensor = tf.tidy(() => {
@@ -323,7 +346,9 @@ const trainBaseModel = async () => {
 
     const gameCount = gamesPlayed + 1;
     let outcomeForWhite = 0;
-    if (game.isCheckmate()) {
+    if (movesPlayed >= maxMovesPerGame) {
+      outcomeForWhite = computeMaterialOutcome(game);
+    } else if (game.isCheckmate()) {
       outcomeForWhite = game.turn() === 'w' ? -1 : 1;
     } else if (game.isDraw()) {
       outcomeForWhite = 0;
