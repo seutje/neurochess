@@ -202,6 +202,33 @@ const App: React.FC = () => {
       workerRef.current?.postMessage({ type: 'reset' });
   };
 
+  const handlePieceDrop = ({
+    sourceSquare,
+    targetSquare,
+    pieceType
+  }: {
+    sourceSquare: string;
+    targetSquare: string | null;
+    pieceType: string;
+  }) => {
+    if (isTraining || isPaused || modelStatus !== 'ready') return false;
+    if (game.turn() !== 'w') return false;
+    if (!targetSquare) return false;
+    const nextGame = new Chess(game.fen());
+    const isPawn = pieceType.toLowerCase().endsWith('p');
+    const isPromotionRank = targetSquare.endsWith('8') || targetSquare.endsWith('1');
+    const promotion = isPawn && isPromotionRank ? 'q' : undefined;
+    const result = nextGame.move({ from: sourceSquare, to: targetSquare, promotion });
+    if (!result) return false;
+    setGame(nextGame);
+    setMoveHistory((prev) => [...prev, result.san]);
+    workerRef.current?.postMessage({
+      type: 'playerMove',
+      move: { from: sourceSquare, to: targetSquare, promotion }
+    });
+    return true;
+  };
+
   return (
     <div className="min-h-screen bg-neuro-900 text-gray-200 font-sans selection:bg-neuro-accent selection:text-neuro-900 p-4 lg:p-8">
       {/* Header */}
@@ -285,6 +312,7 @@ const App: React.FC = () => {
                 <HeatmapBoard 
                     game={game} 
                     heatmap={heatmap} 
+                    onPieceDrop={handlePieceDrop}
                     isBot={isTraining}
                     isPaused={isPaused}
                     alertText={checkStatusText ?? undefined}

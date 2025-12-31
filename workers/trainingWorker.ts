@@ -73,12 +73,18 @@ type SetDifficultyMessage = {
   difficulty: MctsDifficulty;
 };
 
+type PlayerMoveMessage = {
+  type: 'playerMove';
+  move: MoveLike;
+};
+
 type WorkerMessage =
   | InitMessage
   | StartMessage
   | StopMessage
   | ResetMessage
-  | SetDifficultyMessage;
+  | SetDifficultyMessage
+  | PlayerMoveMessage;
 
 type StatusPayload = {
   type: 'status';
@@ -208,6 +214,55 @@ const sampleReplayBatch = (buffer: TrainingSample[], batchSize: number): Trainin
 
 const computeEntropy = (policy: number[]): number => {
   return policy.reduce((acc, p) => (p > 0 ? acc - p * Math.log(p) : acc), 0);
+};
+
+const applyMove = (move: MoveLike | Move): Move | null => {
+  try {
+    const applied = game.move({
+      from: move.from,
+      to: move.to,
+      promotion: move.promotion
+    });
+    return applied ?? null;
+  } catch (err) {
+    console.error('Invalid move attempted:', move, err);
+    return null;
+  }
+};
+
+const applyMoveOrFallback = (move: Move | null): Move | null => {
+  if (!move) return null;
+  const applied = applyMove(move);
+  if (applied) return applied;
+  const fallbackMoves = game.moves({ verbose: true }) as Move[];
+  if (fallbackMoves.length > 0) {
+    const fallback = fallbackMoves[Math.floor(Math.random() * fallbackMoves.length)];
+    const fallbackApplied = applyMove(fallback);
+    if (fallbackApplied) {
+      console.warn('Applied fallback random move:', fallback);
+      return fallbackApplied;
+    }
+  }
+  return null;
+};
+
+const updateAnalysisFromPolicy = (policy: { move: Move; probability: number; visitCount: number }[]) => {
+  const movesWithProbs: MoveProbability[] = policy
+    .map((entry) => ({
+      san: entry.move.san ?? '',
+      probability: entry.probability,
+      isBest: false,
+      move: serializeMove(entry.move as Move),
+      visitCount: entry.visitCount
+    }))
+    .sort((a, b) => b.probability - a.probability);
+
+  if (movesWithProbs.length > 0) movesWithProbs[0].isBest = true;
+  topMoves = movesWithProbs.slice(0, 10);
+  heatmap = movesWithProbs.map((mp) => ({
+    square: mp.move.to,
+    intensity: mp.probability
+  }));
 };
 
 const computeMaterialOutcome = (gameState: Chess): number => {
@@ -358,20 +413,6 @@ const stepTraining = async () => {
       selectedMove = mcts.move as Move | null;
     }
 
-    const applyMove = (move: Move): Move | null => {
-      try {
-        const applied = game.move({
-          from: move.from,
-          to: move.to,
-          promotion: move.promotion
-        });
-        return applied ?? null;
-      } catch (err) {
-        console.error('Invalid move attempted:', move, err);
-        return null;
-      }
-    };
-
     if (selectedMove) {
       const applied = applyMove(selectedMove);
       if (!applied) {
@@ -485,6 +526,31 @@ const stepTraining = async () => {
     perfStats.avgStepMs = perfTotals.stepMs / perfStats.steps;
     postState();
   }
+};
+
+const handlePlayerMove = async (move: MoveLike) => {
+  if (!model || modelStatus !== 'ready') return;
+  if (isTraining || game.isGameOver()) return;
+  if (game.turn() !== 'w') return;
+  const applied = applyMove(move);
+  if (!applied) {
+    postState();
+    return;
+  }
+  moveHistory = [...moveHistory, applied.san];
+  movesPlayed += 1;
+  postState();
+
+  if (game.isGameOver() || game.turn() !== 'b') return;
+
+  const mcts = await runMctsWithIndicator(game, model, MCTS_DIFFICULTY[difficulty]);
+  updateAnalysisFromPolicy(mcts.policy as { move: Move; probability: number; visitCount: number }[]);
+  const appliedBlack = applyMoveOrFallback(mcts.move as Move | null);
+  if (appliedBlack) {
+    moveHistory = [...moveHistory, appliedBlack.san];
+    movesPlayed += 1;
+  }
+  postState();
 };
 
 const scheduleLoop = () => {
@@ -601,6 +667,9 @@ ctx.onmessage = (event: MessageEvent<WorkerMessage>) => {
       break;
     case 'setDifficulty':
       difficulty = message.difficulty;
+      break;
+    case 'playerMove':
+      handlePlayerMove(message.move);
       break;
     default:
       break;

@@ -6,7 +6,7 @@ import { HeatmapSquare } from '../types';
 interface Props {
   game: Chess;
   heatmap: HeatmapSquare[];
-  onPieceDrop?: (source: string, target: string, piece: string) => boolean;
+  onPieceDrop?: (args: { sourceSquare: string; targetSquare: string | null; pieceType: string }) => boolean;
   isBot?: boolean;
   isPaused?: boolean;
   statusText?: string;
@@ -68,6 +68,14 @@ export const HeatmapBoard: React.FC<Props> = ({
 
   // Cast Chessboard to any to avoid type definition issues with 'position' prop in some versions
   const ChessboardComponent = Chessboard as any;
+  const handleDrop = onPieceDrop
+    ? (args: { sourceSquare: string; targetSquare: string | null; piece: { pieceType: string } }) =>
+        onPieceDrop({
+          sourceSquare: args.sourceSquare,
+          targetSquare: args.targetSquare,
+          pieceType: args.piece.pieceType
+        })
+    : undefined;
 
   return (
     <div className="w-full h-full relative group">
@@ -78,7 +86,7 @@ export const HeatmapBoard: React.FC<Props> = ({
               position,
               showAnimations: true,
               animationDurationInMs: 260,
-              onPieceDrop,
+              onPieceDrop: handleDrop,
               squareStyles: customSquareStyles,
               darkSquareStyle: { backgroundColor: '#1d1d1d' },
               lightSquareStyle: { backgroundColor: '#2a2a2a' },
