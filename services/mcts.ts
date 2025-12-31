@@ -157,7 +157,6 @@ export const runMcts = async (
   let lastReadbackMs = 0;
 
   for (let i = 0; i < config.simulations; i++) {
-    const simStart = performance.now();
     const simulation = new Chess(rootFen);
     const path: MctsNode[] = [root];
     let node = root;
@@ -213,10 +212,6 @@ export const runMcts = async (
       value = -value;
     }
 
-    if (config.logSimTiming) {
-      const simMs = performance.now() - simStart;
-      console.info(`[MCTS] sim ${i + 1}/${config.simulations} ${simMs.toFixed(2)} ms`);
-    }
   }
 
   const stats = buildMoveStats(game, root);
