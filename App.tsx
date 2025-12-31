@@ -278,19 +278,9 @@ const App: React.FC = () => {
                     <div className="text-2xl font-bold font-mono">{currentMetrics.gamesPlayed}</div>
                 </div>
                 <div className="bg-neuro-800 p-3 border border-neuro-700">
-                    <div className="text-xs text-neuro-400 font-mono mb-1">WIN RATE (vs MCTS)</div>
+                    <div className="text-xs text-neuro-400 font-mono mb-1">WIN RATE (vs heuristic)</div>
                     <div className="text-2xl font-bold font-mono text-neuro-success">
                         {(currentMetrics.winRate * 100).toFixed(1)}%
-                    </div>
-                </div>
-                <div className="bg-neuro-800 p-3 border border-neuro-700">
-                    <div className="text-xs text-neuro-400 font-mono mb-1">EPOCH</div>
-                    <div className="text-2xl font-bold font-mono text-neuro-accent">{currentMetrics.epoch}</div>
-                </div>
-                <div className="bg-neuro-800 p-3 border border-neuro-700">
-                    <div className="text-xs text-neuro-400 font-mono mb-1">VALUE LOSS</div>
-                    <div className="text-2xl font-bold font-mono text-neuro-danger">
-                        {currentMetrics.valueLoss.toFixed(4)}
                     </div>
                 </div>
             </div>

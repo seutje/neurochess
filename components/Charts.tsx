@@ -29,14 +29,6 @@ export const LossChart: React.FC<ChartProps> = ({ data }) => {
               dot={false}
               animationDuration={300}
             />
-            <Line 
-              type="monotone" 
-              dataKey="valueLoss" 
-              stroke={COLORS.value} 
-              strokeWidth={2} 
-              dot={false}
-              animationDuration={300}
-            />
           </LineChart>
         </ResponsiveContainer>
       </div>
