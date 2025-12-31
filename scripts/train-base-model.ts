@@ -176,6 +176,36 @@ const computeMaterialOutcome = (gameState: Chess): number => {
   return whiteScore > blackScore ? 1 : -1;
 };
 
+const getOpponent = (color: 'w' | 'b'): 'w' | 'b' => (color === 'w' ? 'b' : 'w');
+
+const hasOnlyKing = (gameState: Chess, color: 'w' | 'b'): boolean => {
+  let count = 0;
+  for (const row of gameState.board()) {
+    for (const piece of row) {
+      if (!piece || piece.color !== color) continue;
+      count += 1;
+      if (count > 1) return false;
+      if (piece.type !== 'k') return false;
+    }
+  }
+  return count === 1;
+};
+
+const getForfeitOutcome = (gameState: Chess): number | null => {
+  const turn = gameState.turn();
+  if (gameState.moves().length === 0) {
+    return getOpponent(turn) === 'w' ? 1 : -1;
+  }
+  if (hasOnlyKing(gameState, turn)) {
+    return getOpponent(turn) === 'w' ? 1 : -1;
+  }
+  const other = getOpponent(turn);
+  if (hasOnlyKing(gameState, other)) {
+    return getOpponent(other) === 'w' ? 1 : -1;
+  }
+  return null;
+};
+
 const evaluateValue = async (game: Chess, model: tf.LayersModel): Promise<number> => {
   const tensor = boardToTensor(game);
   const valueTensor = tf.tidy(() => {
@@ -295,8 +325,14 @@ const trainBaseModel = async () => {
     const game = new Chess();
     const currentGameSamples: TrainingSample[] = [];
     let movesPlayed = 0;
+    let forfeitOutcome: number | null = null;
 
     while (!game.isGameOver() && movesPlayed < maxMovesPerGame) {
+      const forfeitCheck = getForfeitOutcome(game);
+      if (forfeitCheck !== null) {
+        forfeitOutcome = forfeitCheck;
+        break;
+      }
       let selectedMove: Move | null = null;
 
       if (game.turn() === 'w') {
@@ -346,7 +382,9 @@ const trainBaseModel = async () => {
 
     const gameCount = gamesPlayed + 1;
     let outcomeForWhite = 0;
-    if (movesPlayed >= maxMovesPerGame) {
+    if (forfeitOutcome !== null) {
+      outcomeForWhite = forfeitOutcome;
+    } else if (movesPlayed >= maxMovesPerGame) {
       outcomeForWhite = computeMaterialOutcome(game);
     } else if (game.isCheckmate()) {
       outcomeForWhite = game.turn() === 'w' ? -1 : 1;
