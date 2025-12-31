@@ -5,7 +5,7 @@ import { Activity, Brain, Cpu, Play, StopCircle, RefreshCw, Circle } from 'lucid
 import { HeatmapBoard } from './components/HeatmapBoard';
 import { LossChart, EntropyChart } from './components/Charts';
 import { MoveAnalysis } from './components/MoveAnalysis';
-import { TrainingMetrics, MoveProbability, HeatmapSquare, MctsDifficulty } from './types';
+import { TrainingMetrics, MoveProbability, HeatmapSquare, MctsDifficulty, PerformanceStats } from './types';
 
 const INITIAL_METRICS: TrainingMetrics = {
   epoch: 0,
@@ -34,6 +34,7 @@ type WorkerStateMessage = {
   currentMetrics: TrainingMetrics;
   metricsHistory: TrainingMetrics[];
   isMctsThinking: boolean;
+  perfStats: PerformanceStats;
 };
 
 type WorkerMessage = WorkerStatusMessage | WorkerStateMessage;
@@ -54,6 +55,17 @@ const App: React.FC = () => {
   const [heatmap, setHeatmap] = useState<HeatmapSquare[]>([]);
   const [topMoves, setTopMoves] = useState<MoveProbability[]>([]);
   const [moveHistory, setMoveHistory] = useState<string[]>([]);
+  const [perfStats, setPerfStats] = useState<PerformanceStats>({
+    lastMctsMs: 0,
+    avgMctsMs: 0,
+    mctsRuns: 0,
+    lastStepMs: 0,
+    avgStepMs: 0,
+    steps: 0,
+    lastReadbackMs: 0,
+    avgReadbackMs: 0,
+    readbacks: 0
+  });
   
   const workerRef = useRef<Worker | null>(null);
 
@@ -76,6 +88,7 @@ const App: React.FC = () => {
       setCurrentMetrics(message.currentMetrics);
       setMetricsHistory(message.metricsHistory);
       setIsMctsThinking(message.isMctsThinking);
+      setPerfStats(message.perfStats);
     };
 
     const baseRoot = new URL(import.meta.env.BASE_URL ?? '/', window.location.origin);
@@ -295,17 +308,21 @@ const App: React.FC = () => {
                   {moveHistory.length === 0 ? (
                     <p className="text-xs text-gray-500 font-mono italic">Awaiting first move...</p>
                   ) : (
-                    Array.from({ length: Math.ceil(moveHistory.length / 2) }).map((_, idx) => {
-                      const whiteMove = moveHistory[idx * 2];
-                      const blackMove = moveHistory[idx * 2 + 1];
+                    (() => {
+                      const totalPairs = Math.ceil(moveHistory.length / 2);
+                      return Array.from({ length: totalPairs }).map((_, idx) => {
+                        const pairIndex = totalPairs - 1 - idx;
+                      const whiteMove = moveHistory[pairIndex * 2];
+                      const blackMove = moveHistory[pairIndex * 2 + 1];
                       return (
                         <div key={`move-${idx}`} className="grid grid-cols-[32px_1fr_1fr] gap-2 text-xs font-mono">
-                          <span className="text-gray-500">{idx + 1}.</span>
+                          <span className="text-gray-500">{pairIndex + 1}.</span>
                           <span className="text-gray-200">{whiteMove ?? ''}</span>
                           <span className="text-gray-400">{blackMove ?? ''}</span>
                         </div>
                       );
-                    })
+                      });
+                    })()
                   )}
                 </div>
             </div>
@@ -315,6 +332,45 @@ const App: React.FC = () => {
         <div className="lg:col-span-12 xl:col-span-3 h-full flex flex-col min-h-0">
             <MoveAnalysis moves={topMoves} />
             
+            <div className="mt-4 bg-neuro-800/70 p-4 rounded-lg border border-neuro-700 shrink-0">
+                <div className="flex items-center gap-2 mb-2">
+                    <Activity size={16} className="text-neuro-400" />
+                    <h4 className="text-sm font-bold text-gray-300">Performance</h4>
+                </div>
+                <div className="space-y-2">
+                    <div className="flex justify-between text-xs">
+                        <span className="text-gray-500">MCTS (last)</span>
+                        <span className="text-gray-300 font-mono">{perfStats.lastMctsMs.toFixed(1)} ms</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                        <span className="text-gray-500">MCTS (avg)</span>
+                        <span className="text-gray-300 font-mono">{perfStats.avgMctsMs.toFixed(1)} ms</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                        <span className="text-gray-500">Step (last)</span>
+                        <span className="text-gray-300 font-mono">{perfStats.lastStepMs.toFixed(1)} ms</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                        <span className="text-gray-500">Step (avg)</span>
+                        <span className="text-gray-300 font-mono">{perfStats.avgStepMs.toFixed(1)} ms</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                        <span className="text-gray-500">Readback (last)</span>
+                        <span className="text-gray-300 font-mono">{perfStats.lastReadbackMs.toFixed(1)} ms</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                        <span className="text-gray-500">Readback (avg)</span>
+                        <span className="text-gray-300 font-mono">{perfStats.avgReadbackMs.toFixed(1)} ms</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                        <span className="text-gray-500">Runs</span>
+                        <span className="text-gray-300 font-mono">
+                          {perfStats.mctsRuns} MCTS / {perfStats.steps} steps / {perfStats.readbacks} readbacks
+                        </span>
+                    </div>
+                </div>
+            </div>
+
             <div className="mt-4 bg-neuro-800/50 p-4 rounded-lg border border-neuro-700 border-dashed shrink-0">
                 <div className="flex items-center gap-2 mb-2">
                     <Activity size={16} className="text-neuro-400" />

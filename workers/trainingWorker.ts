@@ -27,7 +27,8 @@ import type {
   MctsDifficulty,
   MctsConfig,
   TrainingSample,
-  MoveLike
+  MoveLike,
+  PerformanceStats
 } from '../types';
 
 const INITIAL_METRICS: TrainingMetrics = {
@@ -40,9 +41,9 @@ const INITIAL_METRICS: TrainingMetrics = {
 };
 
 const MCTS_DIFFICULTY: Record<MctsDifficulty, MctsConfig> = {
-  easy: { simulations: 80, cPuct: 1.2, temperature: 1.1 },
-  medium: { simulations: 200, cPuct: 1.4, temperature: 0.8 },
-  hard: { simulations: 600, cPuct: 1.6, temperature: 0.4 }
+  easy: { simulations: 80, cPuct: 1.2, temperature: 1.1, logSimTiming: true },
+  medium: { simulations: 200, cPuct: 1.4, temperature: 0.8, logSimTiming: true },
+  hard: { simulations: 600, cPuct: 1.6, temperature: 0.4, logSimTiming: true }
 };
 
 const TRAINING_CONFIG: MctsConfig = {
@@ -50,7 +51,8 @@ const TRAINING_CONFIG: MctsConfig = {
   cPuct: 1.5,
   temperature: 1.0,
   dirichletAlpha: TRAINING_DIRICHLET_ALPHA,
-  dirichletEpsilon: TRAINING_DIRICHLET_EPSILON
+  dirichletEpsilon: TRAINING_DIRICHLET_EPSILON,
+  logSimTiming: true
 };
 
 type WorkerStatus = 'loading' | 'ready' | 'error';
@@ -94,6 +96,7 @@ type StatePayload = {
   currentMetrics: TrainingMetrics;
   metricsHistory: TrainingMetrics[];
   isMctsThinking: boolean;
+  perfStats: PerformanceStats;
 };
 
 const ctx: DedicatedWorkerGlobalScope = self as unknown as DedicatedWorkerGlobalScope;
@@ -117,6 +120,22 @@ let heatmap: HeatmapSquare[] = [];
 let topMoves: MoveProbability[] = [];
 let moveHistory: string[] = [];
 let movesPlayed = 0;
+let perfStats: PerformanceStats = {
+  lastMctsMs: 0,
+  avgMctsMs: 0,
+  mctsRuns: 0,
+  lastStepMs: 0,
+  avgStepMs: 0,
+  steps: 0,
+  lastReadbackMs: 0,
+  avgReadbackMs: 0,
+  readbacks: 0
+};
+const perfTotals = {
+  mctsMs: 0,
+  stepMs: 0,
+  readbackMs: 0
+};
 
 const postStatus = () => {
   const payload: StatusPayload = {
@@ -137,7 +156,8 @@ const postState = () => {
     moveHistory,
     currentMetrics,
     metricsHistory,
-    isMctsThinking
+    isMctsThinking,
+    perfStats
   };
   ctx.postMessage(payload);
 };
@@ -248,8 +268,21 @@ const runMctsWithIndicator = async (
   addNoise = false
 ) => {
   setThinking(true);
+  const start = performance.now();
   try {
-    return await runMcts(gameState, activeModel, config, addNoise);
+    const result = await runMcts(gameState, activeModel, config, addNoise);
+    const elapsed = performance.now() - start;
+    perfTotals.mctsMs += elapsed;
+    perfStats.mctsRuns += 1;
+    perfStats.lastMctsMs = elapsed;
+    perfStats.avgMctsMs = perfTotals.mctsMs / perfStats.mctsRuns;
+    if (result.perf) {
+      perfTotals.readbackMs += result.perf.readbackMsTotal;
+      perfStats.readbacks += result.perf.readbacks;
+      perfStats.lastReadbackMs = result.perf.lastReadbackMs;
+      perfStats.avgReadbackMs = perfStats.readbacks > 0 ? perfTotals.readbackMs / perfStats.readbacks : 0;
+    }
+    return result;
   } finally {
     setThinking(false);
   }
@@ -267,176 +300,186 @@ const resetGameState = () => {
 const stepTraining = async () => {
   if (!model) return;
   if (game.isGameOver() || movesPlayed >= MAX_GAME_MOVES) return;
+  const stepStart = performance.now();
 
-  const turn = game.turn();
-  let selectedMove: Move | null = null;
+  try {
+    const turn = game.turn();
+    let selectedMove: Move | null = null;
 
-  if (turn === 'w') {
-    const mcts = await runMctsWithIndicator(game, model, TRAINING_CONFIG, true);
-    const policyVector = buildPolicyTarget(game, mcts.policy as { move: Move; probability: number }[]);
+    if (turn === 'w') {
+      const mcts = await runMctsWithIndicator(game, model, TRAINING_CONFIG, true);
+      const policyVector = buildPolicyTarget(game, mcts.policy as { move: Move; probability: number }[]);
 
-    currentGameSamples.push({
-      fen: game.fen(),
-      policy: policyVector,
-      player: 'w',
-      value: 0,
-      bootstrapValue: mcts.value
-    });
-
-    const movesWithProbs: MoveProbability[] = mcts.policy
-      .map((entry) => ({
-        san: entry.move.san ?? '',
-        probability: entry.probability,
-        isBest: false,
-        move: serializeMove(entry.move as Move)
-      }))
-      .sort((a, b) => b.probability - a.probability);
-
-    if (movesWithProbs.length > 0) movesWithProbs[0].isBest = true;
-    topMoves = movesWithProbs.slice(0, 10);
-    heatmap = movesWithProbs.map((mp) => ({
-      square: mp.move.to,
-      intensity: mp.probability
-    }));
-
-    currentMetrics = {
-      ...currentMetrics,
-      entropy: computeEntropy(mcts.policy.map((entry) => entry.probability))
-    };
-
-    const sampledIndex = sampleFromPolicy(mcts.policy.map((entry) => entry.probability));
-    selectedMove = (mcts.policy[sampledIndex]?.move as Move) ?? (mcts.move as Move | null);
-  } else {
-    const mcts = await runMctsWithIndicator(game, model, MCTS_DIFFICULTY[difficulty]);
-    const policyVector = buildPolicyTarget(game, mcts.policy as { move: Move; probability: number }[]);
-    currentGameSamples.push({
-      fen: game.fen(),
-      policy: policyVector,
-      player: 'b',
-      value: 0,
-      bootstrapValue: mcts.value
-    });
-    selectedMove = mcts.move as Move | null;
-  }
-
-  const applyMove = (move: Move): Move | null => {
-    try {
-      const applied = game.move({
-        from: move.from,
-        to: move.to,
-        promotion: move.promotion
+      currentGameSamples.push({
+        fen: game.fen(),
+        policy: policyVector,
+        player: 'w',
+        value: 0,
+        bootstrapValue: mcts.value
       });
-      return applied ?? null;
-    } catch (err) {
-      console.error('Invalid move attempted:', move, err);
-      return null;
-    }
-  };
 
-  if (selectedMove) {
-    const applied = applyMove(selectedMove);
-    if (!applied) {
-      console.warn('Move rejected by engine:', selectedMove);
-      const fallbackMoves = game.moves({ verbose: true }) as Move[];
-      if (fallbackMoves.length > 0) {
-        const fallback = fallbackMoves[Math.floor(Math.random() * fallbackMoves.length)];
-        const fallbackApplied = applyMove(fallback);
-        if (fallbackApplied) {
-          console.warn('Applied fallback random move:', fallback);
-          moveHistory = [...moveHistory, fallbackApplied.san];
-          movesPlayed += 1;
-        }
-      }
-    } else {
-      moveHistory = [...moveHistory, applied.san];
-      movesPlayed += 1;
-    }
-  }
+      const movesWithProbs: MoveProbability[] = mcts.policy
+        .map((entry) => ({
+          san: entry.move.san ?? '',
+          probability: entry.probability,
+          isBest: false,
+          move: serializeMove(entry.move as Move)
+        }))
+        .sort((a, b) => b.probability - a.probability);
 
-  postState();
+      if (movesWithProbs.length > 0) movesWithProbs[0].isBest = true;
+      topMoves = movesWithProbs.slice(0, 10);
+      heatmap = movesWithProbs.map((mp) => ({
+        square: mp.move.to,
+        intensity: mp.probability
+      }));
 
-  if (movesPlayed >= MAX_GAME_MOVES || game.isGameOver()) {
-    const gameCount = currentMetrics.gamesPlayed + 1;
-    let outcomeForWhite = 0;
-    if (movesPlayed >= MAX_GAME_MOVES) {
-      outcomeForWhite = computeMaterialOutcome(game);
-    } else if (game.isCheckmate()) {
-      outcomeForWhite = game.turn() === 'w' ? -1 : 1;
-    } else if (game.isDraw()) {
-      outcomeForWhite = 0;
-    }
-
-    const finalizedSamples = currentGameSamples.map((sample) => {
-      const outcomeForPlayer = sample.player === 'w' ? outcomeForWhite : -outcomeForWhite;
-      const bootstrapValue = sample.bootstrapValue ?? 0;
-      const blendedValue =
-        VALUE_TARGET_OUTCOME_WEIGHT * outcomeForPlayer +
-        (1 - VALUE_TARGET_OUTCOME_WEIGHT) * bootstrapValue;
-      return {
-        ...sample,
-        value: blendedValue
+      currentMetrics = {
+        ...currentMetrics,
+        entropy: computeEntropy(mcts.policy.map((entry) => entry.probability))
       };
-    });
-    replayBuffer.push(...finalizedSamples);
-    currentGameSamples = [];
 
-    if (replayBuffer.length > MAX_REPLAY_BUFFER) {
-      replayBuffer.splice(0, replayBuffer.length - MAX_REPLAY_BUFFER);
-    }
-
-    let policyLoss = currentMetrics.policyLoss;
-    let valueLoss = currentMetrics.valueLoss;
-
-    if (replayBuffer.length >= MIN_REPLAY_START) {
-      const effectiveBatchSize = Math.min(BATCH_SIZE, replayBuffer.length);
-      const batch = sampleReplayBatch(replayBuffer, effectiveBatchSize);
-
-      const inputTensors = batch.map((sample) => boardToTensor(new Chess(sample.fen)));
-      const stateTensor = tf.concat(inputTensors, 0);
-      inputTensors.forEach((t) => t.dispose());
-      const policyTensor = tf.tensor2d(batch.map((s) => s.policy), [batch.length, POLICY_OUTPUT_SIZE]);
-      const valueTargets = batch.map((s) => s.value);
-      const valueTensor = tf.tensor2d(valueTargets, [batch.length, 1]);
-
-      const history = await model.fit(stateTensor, [policyTensor, valueTensor], {
-        batchSize: Math.min(BATCH_SIZE, batch.length),
-        epochs: 1,
-        verbose: 0
+      const sampledIndex = sampleFromPolicy(mcts.policy.map((entry) => entry.probability));
+      selectedMove = (mcts.policy[sampledIndex]?.move as Move) ?? (mcts.move as Move | null);
+    } else {
+      const mcts = await runMctsWithIndicator(game, model, MCTS_DIFFICULTY[difficulty]);
+      const policyVector = buildPolicyTarget(game, mcts.policy as { move: Move; probability: number }[]);
+      currentGameSamples.push({
+        fen: game.fen(),
+        policy: policyVector,
+        player: 'b',
+        value: 0,
+        bootstrapValue: mcts.value
       });
-
-      stateTensor.dispose();
-      policyTensor.dispose();
-      valueTensor.dispose();
-
-      const policyHistory = history.history['policy_head_loss'] ?? history.history['loss'];
-      const valueHistory = history.history['value_head_loss'];
-      if (policyHistory && policyHistory.length > 0) policyLoss = Number(policyHistory[0]);
-      if (valueHistory && valueHistory.length > 0) valueLoss = Number(valueHistory[0]);
+      selectedMove = mcts.move as Move | null;
     }
 
-    const newWinRate =
-      (currentMetrics.winRate * currentMetrics.gamesPlayed + (outcomeForWhite === 1 ? 1 : 0)) / gameCount;
-
-    const newMetrics: TrainingMetrics = {
-      epoch: currentMetrics.epoch + 1,
-      gamesPlayed: gameCount,
-      policyLoss,
-      valueLoss,
-      winRate: newWinRate,
-      entropy: currentMetrics.entropy
+    const applyMove = (move: Move): Move | null => {
+      try {
+        const applied = game.move({
+          from: move.from,
+          to: move.to,
+          promotion: move.promotion
+        });
+        return applied ?? null;
+      } catch (err) {
+        console.error('Invalid move attempted:', move, err);
+        return null;
+      }
     };
 
-    currentMetrics = newMetrics;
-    metricsHistory = [...metricsHistory, newMetrics].slice(-50);
+    if (selectedMove) {
+      const applied = applyMove(selectedMove);
+      if (!applied) {
+        console.warn('Move rejected by engine:', selectedMove);
+        const fallbackMoves = game.moves({ verbose: true }) as Move[];
+        if (fallbackMoves.length > 0) {
+          const fallback = fallbackMoves[Math.floor(Math.random() * fallbackMoves.length)];
+          const fallbackApplied = applyMove(fallback);
+          if (fallbackApplied) {
+            console.warn('Applied fallback random move:', fallback);
+            moveHistory = [...moveHistory, fallbackApplied.san];
+            movesPlayed += 1;
+          }
+        }
+      } else {
+        moveHistory = [...moveHistory, applied.san];
+        movesPlayed += 1;
+      }
+    }
 
     postState();
 
-    setTimeout(() => {
-      game.reset();
-      moveHistory = [];
-      movesPlayed = 0;
+    if (movesPlayed >= MAX_GAME_MOVES || game.isGameOver()) {
+      const gameCount = currentMetrics.gamesPlayed + 1;
+      let outcomeForWhite = 0;
+      if (movesPlayed >= MAX_GAME_MOVES) {
+        outcomeForWhite = computeMaterialOutcome(game);
+      } else if (game.isCheckmate()) {
+        outcomeForWhite = game.turn() === 'w' ? -1 : 1;
+      } else if (game.isDraw()) {
+        outcomeForWhite = 0;
+      }
+
+      const finalizedSamples = currentGameSamples.map((sample) => {
+        const outcomeForPlayer = sample.player === 'w' ? outcomeForWhite : -outcomeForWhite;
+        const bootstrapValue = sample.bootstrapValue ?? 0;
+        const blendedValue =
+          VALUE_TARGET_OUTCOME_WEIGHT * outcomeForPlayer +
+          (1 - VALUE_TARGET_OUTCOME_WEIGHT) * bootstrapValue;
+        return {
+          ...sample,
+          value: blendedValue
+        };
+      });
+      replayBuffer.push(...finalizedSamples);
+      currentGameSamples = [];
+
+      if (replayBuffer.length > MAX_REPLAY_BUFFER) {
+        replayBuffer.splice(0, replayBuffer.length - MAX_REPLAY_BUFFER);
+      }
+
+      let policyLoss = currentMetrics.policyLoss;
+      let valueLoss = currentMetrics.valueLoss;
+
+      if (replayBuffer.length >= MIN_REPLAY_START) {
+        const effectiveBatchSize = Math.min(BATCH_SIZE, replayBuffer.length);
+        const batch = sampleReplayBatch(replayBuffer, effectiveBatchSize);
+
+        const inputTensors = batch.map((sample) => boardToTensor(new Chess(sample.fen)));
+        const stateTensor = tf.concat(inputTensors, 0);
+        inputTensors.forEach((t) => t.dispose());
+        const policyTensor = tf.tensor2d(batch.map((s) => s.policy), [batch.length, POLICY_OUTPUT_SIZE]);
+        const valueTargets = batch.map((s) => s.value);
+        const valueTensor = tf.tensor2d(valueTargets, [batch.length, 1]);
+
+        const history = await model.fit(stateTensor, [policyTensor, valueTensor], {
+          batchSize: Math.min(BATCH_SIZE, batch.length),
+          epochs: 1,
+          verbose: 0
+        });
+
+        stateTensor.dispose();
+        policyTensor.dispose();
+        valueTensor.dispose();
+
+        const policyHistory = history.history['policy_head_loss'] ?? history.history['loss'];
+        const valueHistory = history.history['value_head_loss'];
+        if (policyHistory && policyHistory.length > 0) policyLoss = Number(policyHistory[0]);
+        if (valueHistory && valueHistory.length > 0) valueLoss = Number(valueHistory[0]);
+      }
+
+      const newWinRate =
+        (currentMetrics.winRate * currentMetrics.gamesPlayed + (outcomeForWhite === 1 ? 1 : 0)) / gameCount;
+
+      const newMetrics: TrainingMetrics = {
+        epoch: currentMetrics.epoch + 1,
+        gamesPlayed: gameCount,
+        policyLoss,
+        valueLoss,
+        winRate: newWinRate,
+        entropy: currentMetrics.entropy
+      };
+
+      currentMetrics = newMetrics;
+      metricsHistory = [...metricsHistory, newMetrics].slice(-50);
+
       postState();
-    }, 1000);
+
+      setTimeout(() => {
+        game.reset();
+        moveHistory = [];
+        movesPlayed = 0;
+        postState();
+      }, 1000);
+    }
+  } finally {
+    const elapsed = performance.now() - stepStart;
+    perfTotals.stepMs += elapsed;
+    perfStats.steps += 1;
+    perfStats.lastStepMs = elapsed;
+    perfStats.avgStepMs = perfTotals.stepMs / perfStats.steps;
+    postState();
   }
 };
 
@@ -528,6 +571,20 @@ ctx.onmessage = (event: MessageEvent<WorkerMessage>) => {
       currentGameSamples = [];
       metricsHistory = [];
       currentMetrics = { ...INITIAL_METRICS };
+      perfStats = {
+        lastMctsMs: 0,
+        avgMctsMs: 0,
+        mctsRuns: 0,
+        lastStepMs: 0,
+        avgStepMs: 0,
+        steps: 0,
+        lastReadbackMs: 0,
+        avgReadbackMs: 0,
+        readbacks: 0
+      };
+      perfTotals.mctsMs = 0;
+      perfTotals.stepMs = 0;
+      perfTotals.readbackMs = 0;
       resetGameState();
       break;
     case 'setDifficulty':

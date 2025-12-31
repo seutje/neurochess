@@ -15,6 +15,18 @@ export interface TrainingMetrics {
   entropy: number;
 }
 
+export interface PerformanceStats {
+  lastMctsMs: number;
+  avgMctsMs: number;
+  mctsRuns: number;
+  lastStepMs: number;
+  avgStepMs: number;
+  steps: number;
+  lastReadbackMs: number;
+  avgReadbackMs: number;
+  readbacks: number;
+}
+
 export interface MoveProbability {
   san: string;
   probability: number;
@@ -38,6 +50,7 @@ export interface MctsConfig {
   temperature: number;
   dirichletAlpha?: number;
   dirichletEpsilon?: number;
+  logSimTiming?: boolean;
 }
 
 export interface MoveLike {
@@ -62,6 +75,12 @@ export interface MctsResult {
     visitCount: number;
   }[];
   value: number;
+  perf?: {
+    lastReadbackMs: number;
+    avgReadbackMs: number;
+    readbacks: number;
+    readbackMsTotal: number;
+  };
 }
 
 export interface TrainingSample {

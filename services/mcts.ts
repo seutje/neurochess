@@ -7,6 +7,7 @@ import type { MctsConfig, MctsResult, MctsMoveStats } from '../types';
 type MctsEval = {
   policy: Float32Array;
   value: number;
+  readbackMs: number;
 };
 
 class MctsNode {
@@ -39,19 +40,22 @@ const getOutcomeValue = (game: Chess): number => {
 };
 
 const evaluatePosition = async (game: Chess, model: tf.LayersModel): Promise<MctsEval> => {
+  const evalStart = performance.now();
   const tensor = boardToTensor(game);
   const [policyTensor, valueTensor] = tf.tidy(() => {
     const prediction = model.predict(tensor) as tf.Tensor[];
     return [prediction[0], prediction[1]];
   });
+  const readbackStart = performance.now();
   const [policy, value] = await Promise.all([
     (policyTensor as tf.Tensor).data(),
     (valueTensor as tf.Tensor).data()
   ]);
+  const readbackMs = performance.now() - readbackStart;
   tensor.dispose();
   (policyTensor as tf.Tensor).dispose();
   (valueTensor as tf.Tensor).dispose();
-  return { policy: new Float32Array(policy), value: value[0] };
+  return { policy: new Float32Array(policy), value: value[0], readbackMs };
 };
 
 const selectChild = (node: MctsNode, cPuct: number): MctsNode => {
@@ -118,8 +122,12 @@ export const runMcts = async (
 ): Promise<MctsResult> => {
   const root = new MctsNode(1, null);
   const rootFen = game.fen();
+  let readbackMsTotal = 0;
+  let readbacks = 0;
+  let lastReadbackMs = 0;
 
   for (let i = 0; i < config.simulations; i++) {
+    const simStart = performance.now();
     const simulation = new Chess(rootFen);
     const path: MctsNode[] = [root];
     let node = root;
@@ -138,6 +146,9 @@ export const runMcts = async (
       value = getOutcomeValue(simulation);
     } else {
       const evalResult = await evaluatePosition(simulation, model);
+      readbackMsTotal += evalResult.readbackMs;
+      readbacks += 1;
+      lastReadbackMs = evalResult.readbackMs;
       const legalMoves = simulation.moves({ verbose: true });
       const priors = legalMoves.map((move) => {
         const index = moveToIndex(move);
@@ -161,6 +172,11 @@ export const runMcts = async (
       current.valueSum += value;
       value = -value;
     }
+
+    if (config.logSimTiming) {
+      const simMs = performance.now() - simStart;
+      console.info(`[MCTS] sim ${i + 1}/${config.simulations} ${simMs.toFixed(2)} ms`);
+    }
   }
 
   const stats = buildMoveStats(game, root);
@@ -172,5 +188,16 @@ export const runMcts = async (
     visitCount: stat.visitCount
   }));
 
-  return { move, policy, value: root.qValue };
+  const avgReadbackMs = readbacks > 0 ? readbackMsTotal / readbacks : 0;
+  return {
+    move,
+    policy,
+    value: root.qValue,
+    perf: {
+      lastReadbackMs,
+      avgReadbackMs,
+      readbacks,
+      readbackMsTotal
+    }
+  };
 };
