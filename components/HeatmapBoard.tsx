@@ -9,9 +9,10 @@ interface Props {
   onPieceDrop?: (source: string, target: string, piece: string) => boolean;
   isBot?: boolean;
   statusText?: string;
+  alertText?: string;
 }
 
-export const HeatmapBoard: React.FC<Props> = ({ game, heatmap, onPieceDrop, isBot, statusText }) => {
+export const HeatmapBoard: React.FC<Props> = ({ game, heatmap, onPieceDrop, isBot, statusText, alertText }) => {
   const fen = game.fen();
   const piecePlacement = fen.split(' ')[0];
   const position = React.useMemo(() => fenStringToPositionObject(piecePlacement, 8, 8), [piecePlacement]);
@@ -76,6 +77,17 @@ export const HeatmapBoard: React.FC<Props> = ({ game, heatmap, onPieceDrop, isBo
         {statusText ? (
           <div className="absolute top-2 left-2 bg-neuro-900/70 text-neuro-200 text-xs font-mono px-2 py-1 border border-neuro-700">
             {statusText}
+          </div>
+        ) : null}
+        {alertText ? (
+          <div
+            className={`absolute top-2 right-2 text-xs font-mono px-2 py-1 border ${
+              alertText.includes('CHECKMATE')
+                ? 'bg-neuro-danger/20 text-neuro-danger border-neuro-danger'
+                : 'bg-neuro-accent/10 text-neuro-accent border-neuro-accent'
+            }`}
+          >
+            {alertText}
           </div>
         ) : null}
       </div>

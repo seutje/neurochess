@@ -113,6 +113,8 @@ const App: React.FC = () => {
         return backend.toUpperCase();
     }
   })();
+  const checkStatus = game.isCheckmate() ? 'CHECKMATE' : game.isCheck() ? 'CHECK' : null;
+  const checkStatusText = checkStatus ? `${game.turn() === 'w' ? 'WHITE' : 'BLACK'} ${checkStatus}` : null;
 
   // UI Handlers
   const handleStartTraining = () => {
@@ -203,6 +205,7 @@ const App: React.FC = () => {
                     game={game} 
                     heatmap={heatmap} 
                     isBot={isTraining}
+                    alertText={checkStatusText ?? undefined}
                     statusText={
                       modelStatus === 'loading'
                         ? 'INITIALIZING MODEL...'
@@ -245,6 +248,16 @@ const App: React.FC = () => {
                             <span className={game.turn() === 'w' ? 'text-white' : 'text-gray-300'}>
                               {game.turn() === 'w' ? 'WHITE' : 'BLACK'}
                             </span>
+                        </span>
+                    </div>
+                    <div className="flex flex-col">
+                        <span className="text-xs font-mono text-gray-400">CHECK</span>
+                        <span
+                          className={`text-sm font-bold font-mono ${
+                            checkStatus ? 'text-neuro-danger' : 'text-gray-500'
+                          }`}
+                        >
+                          {checkStatusText ?? '—'}
                         </span>
                     </div>
                     <div className="flex flex-col">
