@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   ComposedChart,
   Line,
@@ -16,20 +16,27 @@ interface Props {
   moves: MoveProbability[];
 }
 
-export const MctsVisualization: React.FC<Props> = ({ moves }) => {
-  const chartData = moves.map((move, index) => {
-    const label = move.san || `${move.move.from}${move.move.to}${move.move.promotion ?? ''}`;
-    const visitCount = move.visitCount ?? Math.round(move.probability * 1000);
-    return {
-      index: index + 1,
-      label,
-      visitCount,
-      probability: move.probability * 100
-    };
-  });
+export const MctsVisualization: React.FC<Props> = React.memo(({ moves }) => {
+  const chartData = useMemo(
+    () =>
+      moves.map((move, index) => {
+        const label = move.san || `${move.move.from}${move.move.to}${move.move.promotion ?? ''}`;
+        const visitCount = move.visitCount ?? Math.round(move.probability * 1000);
+        return {
+          index: index + 1,
+          label,
+          visitCount,
+          probability: move.probability * 100
+        };
+      }),
+    [moves]
+  );
 
-  const totalVisits = chartData.reduce((acc, item) => acc + item.visitCount, 0);
-  const bestMove = moves.find((move) => move.isBest) ?? moves[0];
+  const totalVisits = useMemo(
+    () => chartData.reduce((acc, item) => acc + item.visitCount, 0),
+    [chartData]
+  );
+  const bestMove = useMemo(() => moves.find((move) => move.isBest) ?? moves[0], [moves]);
 
   return (
     <div className="bg-neuro-800 p-3 border border-neuro-600 flex flex-col min-h-[320px]">
@@ -87,7 +94,13 @@ export const MctsVisualization: React.FC<Props> = ({ moves }) => {
                   return [value, 'Visits'];
                 }}
               />
-              <Bar yAxisId="visits" dataKey="visitCount" fill={COLORS.policy} barSize={20} />
+              <Bar
+                yAxisId="visits"
+                dataKey="visitCount"
+                fill={COLORS.policy}
+                barSize={20}
+                isAnimationActive={false}
+              />
               <Line
                 yAxisId="probability"
                 type="monotone"
@@ -95,6 +108,7 @@ export const MctsVisualization: React.FC<Props> = ({ moves }) => {
                 stroke={COLORS.entropy}
                 strokeWidth={2}
                 dot={false}
+                isAnimationActive={false}
               />
             </ComposedChart>
           </ResponsiveContainer>
@@ -102,4 +116,4 @@ export const MctsVisualization: React.FC<Props> = ({ moves }) => {
       </div>
     </div>
   );
-};
+});
