@@ -33,7 +33,7 @@ const INITIAL_METRICS: TrainingMetrics = {
   gamesPlayed: 0,
   policyLoss: 2.5,
   valueLoss: 1.0,
-  winRate: 0.1,
+  winRate: 0,
   entropy: 4.5
 };
 
@@ -99,7 +99,7 @@ let model: tf.LayersModel | null = null;
 let modelStatus: WorkerStatus = 'loading';
 let modelError: string | undefined;
 
-let difficulty: MctsDifficulty = 'medium';
+let difficulty: MctsDifficulty = 'easy';
 let isTraining = false;
 let isMctsThinking = false;
 let loopTimeout: number | null = null;

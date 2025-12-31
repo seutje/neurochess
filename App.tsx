@@ -12,7 +12,7 @@ const INITIAL_METRICS: TrainingMetrics = {
   gamesPlayed: 0,
   policyLoss: 2.5,
   valueLoss: 1.0,
-  winRate: 0.1,
+  winRate: 0,
   entropy: 4.5
 };
 
@@ -43,7 +43,7 @@ const App: React.FC = () => {
   const [isTraining, setIsTraining] = useState(false);
   const [modelStatus, setModelStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [modelError, setModelError] = useState<string | null>(null);
-  const [difficulty, setDifficulty] = useState<MctsDifficulty>('medium');
+  const [difficulty, setDifficulty] = useState<MctsDifficulty>('easy');
   const [isMctsThinking, setIsMctsThinking] = useState(false);
   
   // Metrics & Visuals
