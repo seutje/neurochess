@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "train:base": "NODE_OPTIONS=\"--require=./scripts/tfjs-node-compat.cjs\" tsx scripts/train-base-model.ts"
+    "train:base": "NODE_OPTIONS=\"--require=./scripts/tfjs-node-compat.cjs\" tsx scripts/train-base-model.ts",
+    "eval:base": "NODE_OPTIONS=\"--require=./scripts/tfjs-node-compat.cjs\" tsx scripts/eval-base-model.ts"
   },
   "dependencies": {
     "lucide-react": "^0.562.0",
