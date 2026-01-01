@@ -215,13 +215,17 @@ const postState = () => {
   ctx.postMessage(payload);
 };
 
-const sampleFromPolicy = (policy: number[]): number => {
-  let threshold = Math.random();
-  for (let i = 0; i < policy.length; i++) {
-    threshold -= policy[i];
-    if (threshold <= 0) return i;
+const argmaxIndex = (policy: number[]): number => {
+  if (policy.length === 0) return -1;
+  let bestIndex = 0;
+  let bestValue = policy[0];
+  for (let i = 1; i < policy.length; i++) {
+    if (policy[i] > bestValue) {
+      bestValue = policy[i];
+      bestIndex = i;
+    }
   }
-  return policy.length - 1;
+  return bestIndex;
 };
 
 const buildPolicyTarget = (game: Chess, policy: { move: Move; probability: number }[]): number[] => {
@@ -534,8 +538,8 @@ const stepTraining = async () => {
         entropy: computeEntropy(mcts.policy.map((entry) => entry.probability))
       };
 
-      const sampledIndex = sampleFromPolicy(mcts.policy.map((entry) => entry.probability));
-      selectedMove = (mcts.policy[sampledIndex]?.move as Move) ?? (mcts.move as Move | null);
+      const bestIndex = argmaxIndex(mcts.policy.map((entry) => entry.probability));
+      selectedMove = (mcts.policy[bestIndex]?.move as Move) ?? (mcts.move as Move | null);
     } else {
       const mcts = await runMctsWithIndicator(game, model, MCTS_DIFFICULTY[difficulty]);
       const policyVector = buildPolicyTarget(game, mcts.policy as { move: Move; probability: number }[]);
