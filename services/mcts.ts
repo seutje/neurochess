@@ -73,7 +73,8 @@ const scoreHeuristicMove = (move: Move): number => {
   let score = 1;
   if (move.captured) {
     const capturedValue = MATERIAL_VALUES[move.captured] ?? 0;
-    score += 1.5 + capturedValue;
+    const captureBonus = 1.5 + capturedValue * capturedValue * 0.2;
+    score += captureBonus;
   }
   if (move.promotion) {
     const promotionValue = MATERIAL_VALUES[move.promotion] ?? 0;
