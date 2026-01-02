@@ -69,6 +69,34 @@ const evaluateHeuristic = (game: Chess): number => {
   return clamp(materialDiff / MAX_MATERIAL, -1, 1);
 };
 
+const scoreHeuristicMove = (move: Move): number => {
+  let score = 1;
+  if (move.captured) {
+    const capturedValue = MATERIAL_VALUES[move.captured] ?? 0;
+    score += 1.5 + capturedValue;
+  }
+  if (move.promotion) {
+    const promotionValue = MATERIAL_VALUES[move.promotion] ?? 0;
+    score += 2 + promotionValue;
+  }
+  const san = move.san ?? '';
+  if (san.includes('#')) {
+    score += 20;
+  } else if (san.includes('+')) {
+    score += 1.5;
+  }
+  return score;
+};
+
+const buildHeuristicPriors = (moves: Move[]): number[] => {
+  const scores = moves.map((move) => scoreHeuristicMove(move));
+  const sum = scores.reduce((acc, value) => acc + value, 0);
+  if (sum <= 0) {
+    return moves.length > 0 ? new Array(moves.length).fill(1 / moves.length) : [];
+  }
+  return scores.map((value) => value / sum);
+};
+
 const evaluatePosition = async (game: Chess, model: tf.LayersModel): Promise<MctsEval> => {
   const evalStart = performance.now();
   const tensor = boardToTensor(game);
@@ -180,8 +208,7 @@ export const runMcts = async (
 
       if (config.useHeuristic) {
         valueResult = evaluateHeuristic(simulation);
-        normalized =
-          legalMoves.length > 0 ? new Array(legalMoves.length).fill(1 / legalMoves.length) : [];
+        normalized = buildHeuristicPriors(legalMoves);
       } else {
         const evalResult = await evaluatePosition(simulation, model);
         readbackMsTotal += evalResult.readbackMs;
