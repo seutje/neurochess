@@ -95,8 +95,13 @@ export interface MctsResult {
 
 export interface TrainingSample {
   fen: string;
-  policy: number[];
+  policy: SparsePolicyTarget;
   player: 'w' | 'b';
   value: number;
   bootstrapValue?: number;
+}
+
+export interface SparsePolicyTarget {
+  indices: number[];
+  probs: number[];
 }

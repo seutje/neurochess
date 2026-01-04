@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Training checkpoints
+public/models/base/checkpoints/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -2,7 +2,7 @@ import { Chess, Move } from 'chess.js';
 import '@tensorflow/tfjs-node';
 import * as tf from '@tensorflow/tfjs';
 import path from 'node:path';
-import { access, mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { compileTinyZeroModel, createTinyZeroModel } from '../services/model';
 import { boardToTensor } from '../services/tensorUtils';
 import { runMcts } from '../services/mcts';
@@ -19,7 +19,7 @@ import {
   VALUE_TARGET_OUTCOME_WEIGHT,
   MAX_GAME_MOVES
 } from '../constants';
-import type { MctsConfig, TrainingSample } from '../types';
+import type { MctsConfig, SparsePolicyTarget, TrainingSample } from '../types';
 
 type TrainOptions = {
   games: number;
@@ -28,6 +28,17 @@ type TrainOptions = {
   opponentSimulations: number;
   batchSize: number;
 };
+
+type CheckpointMeta = {
+  gamesPlayed: number;
+  winRate: number;
+  policyLoss: number;
+  valueLoss: number;
+  savedAt: string;
+};
+
+const CHECKPOINT_INTERVAL_RATIO = 0.1;
+const MEMORY_LOG_INTERVAL_RATIO = 0.01;
 
 const args = process.argv.slice(2);
 
@@ -71,6 +82,7 @@ Options:
   --batch-size <n>        Batch size per update (default: ${BATCH_SIZE})
   --out <dir>             Output directory (default: public/models/base)
   --reset                 Reset to a fresh model instead of loading the last base model
+  --resume                Resume from the latest checkpoint in the output directory
   --help, -h              Show this help
 `);
   process.exit(0);
@@ -97,6 +109,7 @@ const options: TrainOptions = {
   batchSize: Math.max(1, Math.floor(readNumber('batch-size', BATCH_SIZE)))
 };
 const resetModel = args.includes('--reset');
+const resumeTraining = args.includes('--resume');
 
 const sampleFromPolicy = (policy: number[]): number => {
   let threshold = Math.random();
@@ -121,26 +134,45 @@ const applyMove = (game: Chess, move: Move): boolean => {
   }
 };
 
-const buildPolicyTarget = (game: Chess, policy: { move: Move; probability: number }[]): number[] => {
-  const target = new Array(POLICY_OUTPUT_SIZE).fill(0);
+const buildPolicyTarget = (
+  game: Chess,
+  policy: { move: Move; probability: number }[]
+): SparsePolicyTarget => {
+  const legalMoves = game.moves({ verbose: true }) as Move[];
+  if (legalMoves.length === 0) return { indices: [], probs: [] };
+
+  const base = new Map<number, number>();
   policy.forEach((entry) => {
-    target[moveToIndex(entry.move)] = entry.probability;
+    base.set(moveToIndex(entry.move), entry.probability);
   });
 
-  if (POLICY_LABEL_SMOOTHING > 0) {
-    const legalMoves = game.moves({ verbose: true }) as Move[];
-    const legalCount = legalMoves.length;
-    if (legalCount > 0) {
-      const smooth = POLICY_LABEL_SMOOTHING / legalCount;
-      const scale = 1 - POLICY_LABEL_SMOOTHING;
-      for (const move of legalMoves) {
-        const index = moveToIndex(move);
-        target[index] = target[index] * scale + smooth;
-      }
-    }
+  const smooth =
+    POLICY_LABEL_SMOOTHING > 0 ? POLICY_LABEL_SMOOTHING / legalMoves.length : 0;
+  const scale = POLICY_LABEL_SMOOTHING > 0 ? 1 - POLICY_LABEL_SMOOTHING : 1;
+
+  const indices: number[] = [];
+  const probs: number[] = [];
+  for (const move of legalMoves) {
+    const index = moveToIndex(move);
+    const baseProb = base.get(index) ?? 0;
+    indices.push(index);
+    probs.push(baseProb * scale + smooth);
   }
 
-  return target;
+  return { indices, probs };
+};
+
+const buildPolicyTensor = (batch: TrainingSample[]): tf.Tensor2D => {
+  const data = new Float32Array(batch.length * POLICY_OUTPUT_SIZE);
+  batch.forEach((sample, row) => {
+    const offset = row * POLICY_OUTPUT_SIZE;
+    for (let i = 0; i < sample.policy.indices.length; i++) {
+      const index = sample.policy.indices[i] ?? 0;
+      const prob = sample.policy.probs[i] ?? 0;
+      data[offset + index] = prob;
+    }
+  });
+  return tf.tensor2d(data, [batch.length, POLICY_OUTPUT_SIZE]);
 };
 
 const sampleReplayBatch = (buffer: TrainingSample[], batchSize: number): TrainingSample[] => {
@@ -262,6 +294,69 @@ const saveModel = async (model: tf.LayersModel, outDir: string) => {
   );
 };
 
+const formatMemoryMb = (bytes: number): string => (bytes / (1024 * 1024)).toFixed(1);
+
+const logMemoryUsage = (label: string) => {
+  const usage = process.memoryUsage();
+  console.log(
+    `${label} | rss ${formatMemoryMb(usage.rss)}MB | heap ${formatMemoryMb(usage.heapUsed)}/${formatMemoryMb(
+      usage.heapTotal
+    )}MB | external ${formatMemoryMb(usage.external)}MB | arrayBuffers ${formatMemoryMb(
+      usage.arrayBuffers ?? 0
+    )}MB`
+  );
+};
+
+const saveCheckpoint = async (
+  model: tf.LayersModel,
+  outDir: string,
+  meta: Omit<CheckpointMeta, 'savedAt'>
+) => {
+  const checkpointRoot = path.join(outDir, 'checkpoints');
+  const checkpointDir = path.join(checkpointRoot, `game-${meta.gamesPlayed}`);
+  await saveModel(model, checkpointDir);
+  const fullMeta: CheckpointMeta = { ...meta, savedAt: new Date().toISOString() };
+  await writeFile(path.join(checkpointDir, 'checkpoint.json'), JSON.stringify(fullMeta, null, 2));
+  await writeFile(path.join(checkpointRoot, 'latest.json'), JSON.stringify(fullMeta, null, 2));
+  console.log(`Checkpoint saved to ${checkpointDir}`);
+};
+
+const loadLatestCheckpoint = async (
+  outDir: string
+): Promise<{ model: tf.LayersModel; meta: CheckpointMeta | null; gamesPlayed: number } | null> => {
+  const checkpointRoot = path.resolve(process.cwd(), outDir, 'checkpoints');
+  let entries: string[] = [];
+  try {
+    entries = await readdir(checkpointRoot);
+  } catch (err) {
+    return null;
+  }
+  let bestGame = -1;
+  let bestDir: string | null = null;
+  for (const entry of entries) {
+    const match = /^game-(\d+)$/.exec(entry);
+    if (!match) continue;
+    const gameCount = Number(match[1]);
+    if (!Number.isFinite(gameCount) || gameCount <= bestGame) continue;
+    bestGame = gameCount;
+    bestDir = entry;
+  }
+  if (!bestDir || bestGame < 0) return null;
+  const checkpointDir = path.join(checkpointRoot, bestDir);
+  const modelPath = path.join(checkpointDir, 'model.json');
+  await access(modelPath);
+  const loaded = await tf.loadLayersModel(`file://${modelPath}`);
+  const model = compileTinyZeroModel(loaded);
+  let meta: CheckpointMeta | null = null;
+  try {
+    const raw = await readFile(path.join(checkpointDir, 'checkpoint.json'), 'utf8');
+    meta = JSON.parse(raw) as CheckpointMeta;
+  } catch (err) {
+    meta = null;
+  }
+  return { model, meta, gamesPlayed: bestGame };
+};
+
 const trainBaseModel = async () => {
   console.log('Training TinyZero base model...');
   console.log(`Games: ${options.games}`);
@@ -281,9 +376,35 @@ const trainBaseModel = async () => {
   const resolvedOutDir = path.resolve(process.cwd(), options.outDir);
   const modelPath = path.join(resolvedOutDir, 'model.json');
   let model: tf.LayersModel;
+  let gamesPlayed = 0;
+  let winRate = 0;
+  let policyLoss = 2.5;
+  let valueLoss = 1.0;
   if (resetModel) {
     console.log('Reset flag detected; starting from a fresh model.');
     model = createTinyZeroModel();
+  } else if (resumeTraining) {
+    const checkpoint = await loadLatestCheckpoint(options.outDir);
+    if (checkpoint) {
+      model = checkpoint.model;
+      gamesPlayed = checkpoint.meta?.gamesPlayed ?? checkpoint.gamesPlayed;
+      winRate = checkpoint.meta?.winRate ?? winRate;
+      policyLoss = checkpoint.meta?.policyLoss ?? policyLoss;
+      valueLoss = checkpoint.meta?.valueLoss ?? valueLoss;
+      console.log(`Resumed from checkpoint at game ${gamesPlayed}.`);
+      logMemoryUsage('Memory after resume');
+    } else {
+      console.warn('No checkpoint found; falling back to base model load.');
+      try {
+        await access(modelPath);
+        const loaded = await tf.loadLayersModel(`file://${modelPath}`);
+        model = compileTinyZeroModel(loaded);
+        console.log(`Loaded base model from ${options.outDir}`);
+      } catch (err) {
+        console.warn('Base model not found; using fresh weights.', err);
+        model = createTinyZeroModel();
+      }
+    }
   } else {
     try {
       await access(modelPath);
@@ -311,15 +432,16 @@ const trainBaseModel = async () => {
     useHeuristic: true
   };
 
-  let gamesPlayed = 0;
-  let winRate = 0;
-  let policyLoss = 2.5;
-  let valueLoss = 1.0;
-
   const replayBuffer: TrainingSample[] = [];
   const start = Date.now();
 
   const maxMovesPerGame = MAX_GAME_MOVES;
+  const checkpointEvery = Math.max(1, Math.floor(options.games * CHECKPOINT_INTERVAL_RATIO));
+  const memoryLogEvery = Math.max(1, Math.floor(options.games * MEMORY_LOG_INTERVAL_RATIO));
+  if (gamesPlayed > 0 && gamesPlayed >= options.games) {
+    console.log(`Already at ${gamesPlayed} games; nothing to do.`);
+    return;
+  }
 
   while (gamesPlayed < options.games) {
     const game = new Chess();
@@ -418,7 +540,7 @@ const trainBaseModel = async () => {
       const inputTensors = batch.map((sample) => boardToTensor(new Chess(sample.fen)));
       const stateTensor = tf.concat(inputTensors, 0);
       inputTensors.forEach((t) => t.dispose());
-      const policyTensor = tf.tensor2d(batch.map((s) => s.policy), [batch.length, POLICY_OUTPUT_SIZE]);
+      const policyTensor = buildPolicyTensor(batch);
       const valueTargets = batch.map((s) => s.value);
       const valueTensor = tf.tensor2d(valueTargets, [batch.length, 1]);
 
@@ -444,6 +566,17 @@ const trainBaseModel = async () => {
     console.log(
       `Game ${gamesPlayed}/${options.games} | winRate ${(winRate * 100).toFixed(1)}% | policyLoss ${policyLoss.toFixed(4)} | valueLoss ${valueLoss.toFixed(4)}`
     );
+    if (gamesPlayed % memoryLogEvery === 0) {
+      logMemoryUsage(`Memory after game ${gamesPlayed}`);
+    }
+    if (gamesPlayed % checkpointEvery === 0) {
+      await saveCheckpoint(model, options.outDir, {
+        gamesPlayed,
+        winRate,
+        policyLoss,
+        valueLoss
+      });
+    }
   }
 
   await saveModel(model, options.outDir);
