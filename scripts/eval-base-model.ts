@@ -14,6 +14,7 @@ type EvalOptions = {
   cPuct: number;
   modelPath: string;
   maxMoves: number;
+  opponent: 'heuristic' | 'self';
 };
 
 const args = process.argv.slice(2);
@@ -48,6 +49,7 @@ Options:
   --cpuct <n>         MCTS cPuct value (default: 1.5)
   --model <path>      Model directory or model.json (default: public/models/base)
   --max-moves <n>     Max moves before declaring a draw (default: ${MAX_GAME_MOVES})
+  --opponent <type>   Opponent type: heuristic or self (default: heuristic)
   --help, -h          Show this help
 `);
   process.exit(0);
@@ -59,7 +61,8 @@ const options: EvalOptions = {
   temperature: readNumber('temperature', 0),
   cPuct: readNumber('cpuct', 1.5),
   modelPath: readArg('model', 'public/models/base'),
-  maxMoves: Math.max(1, Math.floor(readNumber('max-moves', MAX_GAME_MOVES)))
+  maxMoves: Math.max(1, Math.floor(readNumber('max-moves', MAX_GAME_MOVES))),
+  opponent: readArg('opponent', 'heuristic') === 'self' ? 'self' : 'heuristic'
 };
 
 const resolveModelPath = (input: string): string => {
@@ -67,8 +70,35 @@ const resolveModelPath = (input: string): string => {
   return resolved.endsWith('.json') ? resolved : path.join(resolved, 'model.json');
 };
 
+const computeMaterialOutcome = (gameState: Chess): number => {
+  const pieceValues: Record<string, number> = {
+    p: 1,
+    n: 3,
+    b: 3,
+    r: 5,
+    q: 9,
+    k: 0
+  };
+  let whiteScore = 0;
+  let blackScore = 0;
+  for (const row of gameState.board()) {
+    for (const piece of row) {
+      if (!piece) continue;
+      const value = pieceValues[piece.type] ?? 0;
+      if (piece.color === 'w') whiteScore += value;
+      else blackScore += value;
+    }
+  }
+  if (whiteScore === blackScore) return 0;
+  return whiteScore > blackScore ? 1 : -1;
+};
+
 const evaluateModel = async () => {
-  console.log('Evaluating base model with symmetric MCTS settings...');
+  const matchupLabel =
+    options.opponent === 'heuristic'
+      ? 'model vs heuristic opponent'
+      : 'symmetric model mirror';
+  console.log(`Evaluating base model (${matchupLabel})...`);
   console.log(`Games: ${options.games}`);
   console.log(`Simulations: ${options.simulations}`);
   console.log(`Temperature: ${options.temperature}`);
@@ -88,23 +118,32 @@ const evaluateModel = async () => {
   await access(modelPath);
   const model = await tf.loadLayersModel(`file://${modelPath}`);
 
-  const config: MctsConfig = {
+  const modelConfig: MctsConfig = {
     simulations: options.simulations,
     cPuct: options.cPuct,
     temperature: options.temperature,
     useHeuristic: false
   };
+  const opponentConfig: MctsConfig = {
+    simulations: options.simulations,
+    cPuct: options.cPuct,
+    temperature: options.temperature,
+    useHeuristic: options.opponent === 'heuristic'
+  };
 
-  let whiteWins = 0;
-  let blackWins = 0;
+  let modelWins = 0;
+  let opponentWins = 0;
   let draws = 0;
   const start = Date.now();
 
   for (let i = 0; i < options.games; i++) {
     const game = new Chess();
     let movesPlayed = 0;
+    const modelPlaysWhite = options.opponent === 'self' ? true : i % 2 === 0;
 
     while (!game.isGameOver() && movesPlayed < options.maxMoves) {
+      const modelTurn = modelPlaysWhite ? game.turn() === 'w' : game.turn() === 'b';
+      const config = modelTurn ? modelConfig : opponentConfig;
       const mcts = await runMcts(game, model, config);
       const move = mcts.move;
       if (!move) break;
@@ -114,24 +153,35 @@ const evaluateModel = async () => {
 
     if (game.isCheckmate()) {
       const winner = game.turn() === 'w' ? 'b' : 'w';
-      if (winner === 'w') whiteWins += 1;
-      else blackWins += 1;
+      const modelWon = modelPlaysWhite ? winner === 'w' : winner === 'b';
+      if (modelWon) modelWins += 1;
+      else opponentWins += 1;
+    } else if (movesPlayed >= options.maxMoves) {
+      const materialOutcome = computeMaterialOutcome(game);
+      if (materialOutcome === 0) {
+        draws += 1;
+      } else {
+        const winner = materialOutcome === 1 ? 'w' : 'b';
+        const modelWon = modelPlaysWhite ? winner === 'w' : winner === 'b';
+        if (modelWon) modelWins += 1;
+        else opponentWins += 1;
+      }
     } else {
       draws += 1;
     }
 
     const total = i + 1;
-    const whiteWinRate = (whiteWins / total) * 100;
-    const blackWinRate = (blackWins / total) * 100;
+    const modelWinRate = (modelWins / total) * 100;
+    const opponentWinRate = (opponentWins / total) * 100;
     const drawRate = (draws / total) * 100;
     console.log(
-      `Game ${total}/${options.games} | white ${whiteWinRate.toFixed(1)}% | black ${blackWinRate.toFixed(1)}% | draws ${drawRate.toFixed(1)}%`
+      `Game ${total}/${options.games} | model ${modelWinRate.toFixed(1)}% | opponent ${opponentWinRate.toFixed(1)}% | draws ${drawRate.toFixed(1)}%`
     );
   }
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   console.log(
-    `Done in ${elapsed}s. White ${whiteWins}, Black ${blackWins}, Draws ${draws} (Total ${options.games}).`
+    `Done in ${elapsed}s. Model ${modelWins}, Opponent ${opponentWins}, Draws ${draws} (Total ${options.games}).`
   );
 };
 
