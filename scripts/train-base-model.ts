@@ -9,6 +9,8 @@ import { runMcts } from '../services/mcts';
 import { moveToIndex } from '../services/moveEncoding';
 import {
   BATCH_SIZE,
+  BOARD_SIZE,
+  INPUT_PLANES,
   MAX_REPLAY_BUFFER,
   MIN_REPLAY_START,
   POLICY_LABEL_SMOOTHING,
@@ -27,6 +29,8 @@ type TrainOptions = {
   trainSimulations: number;
   opponentSimulations: number;
   batchSize: number;
+  trainEvery: number;
+  trainEpochs: number;
 };
 
 type CheckpointMeta = {
@@ -80,6 +84,8 @@ Options:
   --training-sims <n>     Alias for --train-sims
   --opponent-sims <n>     MCTS simulations for opponent (default: 80)
   --batch-size <n>        Batch size per update (default: ${BATCH_SIZE})
+  --train-every <n>       Train every N games (default: 1)
+  --train-epochs <n>      Epochs per training update (default: 1)
   --out <dir>             Output directory (default: public/models/base)
   --reset                 Reset to a fresh model instead of loading the last base model
   --resume                Resume from the latest checkpoint in the output directory
@@ -106,7 +112,9 @@ const options: TrainOptions = {
     Math.floor(readNumber('train-sims', readPositionalNumber(1) ?? TRAINING_MCTS_SIMULATIONS, ['training-sims']))
   ),
   opponentSimulations: Math.max(1, Math.floor(readNumber('opponent-sims', readPositionalNumber(2) ?? 80))),
-  batchSize: Math.max(1, Math.floor(readNumber('batch-size', BATCH_SIZE)))
+  batchSize: Math.max(1, Math.floor(readNumber('batch-size', BATCH_SIZE))),
+  trainEvery: Math.max(1, Math.floor(readNumber('train-every', 1))),
+  trainEpochs: Math.max(1, Math.floor(readNumber('train-epochs', 1)))
 };
 const resetModel = args.includes('--reset');
 const resumeTraining = args.includes('--resume');
@@ -173,6 +181,23 @@ const buildPolicyTensor = (batch: TrainingSample[]): tf.Tensor2D => {
     }
   });
   return tf.tensor2d(data, [batch.length, POLICY_OUTPUT_SIZE]);
+};
+
+const buildStateTensor = (batch: TrainingSample[]): tf.Tensor4D => {
+  const stateSize = BOARD_SIZE * BOARD_SIZE * INPUT_PLANES;
+  const data = new Float32Array(batch.length * stateSize);
+  batch.forEach((sample, row) => {
+    const offset = row * stateSize;
+    if (sample.state && sample.state.length === stateSize) {
+      data.set(sample.state, offset);
+      return;
+    }
+    const tensor = boardToTensor(new Chess(sample.fen));
+    const sampleData = tensor.dataSync() as Float32Array;
+    data.set(sampleData, offset);
+    tensor.dispose();
+  });
+  return tf.tensor4d(data, [batch.length, BOARD_SIZE, BOARD_SIZE, INPUT_PLANES]);
 };
 
 const sampleReplayBatch = (buffer: TrainingSample[], batchSize: number): TrainingSample[] => {
@@ -248,6 +273,13 @@ const evaluateValue = async (game: Chess, model: tf.LayersModel): Promise<number
   tensor.dispose();
   valueTensor.dispose();
   return valueData[0] ?? 0;
+};
+
+const buildStateData = (game: Chess): Float32Array => {
+  const tensor = boardToTensor(game);
+  const data = tensor.dataSync() as Float32Array;
+  tensor.dispose();
+  return data;
 };
 
 const saveModel = async (model: tf.LayersModel, outDir: string) => {
@@ -363,6 +395,8 @@ const trainBaseModel = async () => {
   console.log(`Training sims: ${options.trainSimulations}`);
   console.log(`Opponent sims: ${options.opponentSimulations}`);
   console.log(`Batch size: ${options.batchSize}`);
+  console.log(`Train every: ${options.trainEvery}`);
+  console.log(`Train epochs: ${options.trainEpochs}`);
   console.log(`Output: ${options.outDir}`);
 
   try {
@@ -465,7 +499,8 @@ const trainBaseModel = async () => {
           policy: policyVector,
           player: 'w',
           value: 0,
-          bootstrapValue: mcts.value
+          bootstrapValue: mcts.value,
+          state: buildStateData(game)
         });
 
         const sampledIndex = sampleFromPolicy(mcts.policy.map((entry) => entry.probability));
@@ -478,7 +513,8 @@ const trainBaseModel = async () => {
           policy: policyVector,
           player: 'b',
           value: 0,
-          bootstrapValue: mcts.value
+          bootstrapValue: mcts.value,
+          state: buildStateData(game)
         });
         selectedMove = mcts.move;
       }
@@ -533,20 +569,18 @@ const trainBaseModel = async () => {
       replayBuffer.splice(0, replayBuffer.length - MAX_REPLAY_BUFFER);
     }
 
-    if (replayBuffer.length >= MIN_REPLAY_START) {
+    if (replayBuffer.length >= MIN_REPLAY_START && gameCount % options.trainEvery === 0) {
       const effectiveBatchSize = Math.min(options.batchSize, replayBuffer.length);
       const batch = sampleReplayBatch(replayBuffer, effectiveBatchSize);
 
-      const inputTensors = batch.map((sample) => boardToTensor(new Chess(sample.fen)));
-      const stateTensor = tf.concat(inputTensors, 0);
-      inputTensors.forEach((t) => t.dispose());
+      const stateTensor = buildStateTensor(batch);
       const policyTensor = buildPolicyTensor(batch);
       const valueTargets = batch.map((s) => s.value);
       const valueTensor = tf.tensor2d(valueTargets, [batch.length, 1]);
 
       const history = await model.fit(stateTensor, [policyTensor, valueTensor], {
         batchSize: Math.min(options.batchSize, batch.length),
-        epochs: 1,
+        epochs: options.trainEpochs,
         verbose: 0
       });
 

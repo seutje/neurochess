@@ -99,6 +99,7 @@ export interface TrainingSample {
   player: 'w' | 'b';
   value: number;
   bootstrapValue?: number;
+  state?: Float32Array;
 }
 
 export interface SparsePolicyTarget {
