@@ -27,6 +27,7 @@ import type {
   MctsDifficulty,
   MctsConfig,
   TrainingSample,
+  SparsePolicyTarget,
   MoveLike,
   PerformanceStats,
   Color,
@@ -228,26 +229,41 @@ const argmaxIndex = (policy: number[]): number => {
   return bestIndex;
 };
 
-const buildPolicyTarget = (game: Chess, policy: { move: Move; probability: number }[]): number[] => {
-  const target = new Array(POLICY_OUTPUT_SIZE).fill(0);
+const buildPolicyTarget = (game: Chess, policy: { move: Move; probability: number }[]): SparsePolicyTarget => {
+  const legalMoves = game.moves({ verbose: true }) as Move[];
+  if (legalMoves.length === 0) return { indices: [], probs: [] };
+
+  const base = new Map<number, number>();
   policy.forEach((entry) => {
-    target[moveToIndex(entry.move)] = entry.probability;
+    base.set(moveToIndex(entry.move), entry.probability);
   });
 
-  if (POLICY_LABEL_SMOOTHING > 0) {
-    const legalMoves = game.moves({ verbose: true }) as Move[];
-    const legalCount = legalMoves.length;
-    if (legalCount > 0) {
-      const smooth = POLICY_LABEL_SMOOTHING / legalCount;
-      const scale = 1 - POLICY_LABEL_SMOOTHING;
-      for (const move of legalMoves) {
-        const index = moveToIndex(move);
-        target[index] = target[index] * scale + smooth;
-      }
-    }
+  const smooth = POLICY_LABEL_SMOOTHING > 0 ? POLICY_LABEL_SMOOTHING / legalMoves.length : 0;
+  const scale = POLICY_LABEL_SMOOTHING > 0 ? 1 - POLICY_LABEL_SMOOTHING : 1;
+
+  const indices: number[] = [];
+  const probs: number[] = [];
+  for (const move of legalMoves) {
+    const index = moveToIndex(move);
+    const baseProb = base.get(index) ?? 0;
+    indices.push(index);
+    probs.push(baseProb * scale + smooth);
   }
 
-  return target;
+  return { indices, probs };
+};
+
+const buildPolicyTensor = (batch: TrainingSample[]): tf.Tensor2D => {
+  const data = new Float32Array(batch.length * POLICY_OUTPUT_SIZE);
+  batch.forEach((sample, row) => {
+    const offset = row * POLICY_OUTPUT_SIZE;
+    for (let i = 0; i < sample.policy.indices.length; i++) {
+      const index = sample.policy.indices[i] ?? 0;
+      const prob = sample.policy.probs[i] ?? 0;
+      data[offset + index] = prob;
+    }
+  });
+  return tf.tensor2d(data, [batch.length, POLICY_OUTPUT_SIZE]);
 };
 
 const sampleReplayBatch = (buffer: TrainingSample[], batchSize: number): TrainingSample[] => {
@@ -435,7 +451,7 @@ const finalizeTrainingGame = async (outcomeForWhite: number) => {
     const inputTensors = batch.map((sample) => boardToTensor(new Chess(sample.fen)));
     const stateTensor = tf.concat(inputTensors, 0);
     inputTensors.forEach((t) => t.dispose());
-    const policyTensor = tf.tensor2d(batch.map((s) => s.policy), [batch.length, POLICY_OUTPUT_SIZE]);
+    const policyTensor = buildPolicyTensor(batch);
     const valueTargets = batch.map((s) => s.value);
     const valueTensor = tf.tensor2d(valueTargets, [batch.length, 1]);
 
